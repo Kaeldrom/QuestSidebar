@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: |cff66ddffQuest Sidebar|r
+## Notes: Your whole quest log down the side of the screen, grouped by zone. The zone you're in opens by itself.
+## Author: Kaeldrom
+## Version: 1.0.0
+## SavedVariablesPerCharacter: QuestSidebarDB
+## AddonCompartmentFunc: QuestSidebar_Toggle
+## IconTexture: Interface\Icons\INV_Misc_Note_01
+
+QuestSidebar.lua
+QuestSidebar_UI.lua
