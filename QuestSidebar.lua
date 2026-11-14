@@ -660,6 +660,9 @@ local function Slash(msg)
         s.minimap = not s.minimap
         QSB.UI.ApplyMinimap()
         Print("Minimap button: " .. OnOff(s.minimap))
+    elseif cmd == "turnin" or cmd == "done" then
+        if not QSB.UI.IsShown() then QSB.UI.ToggleShown() end
+        QSB.UI.SelectTab("turnin")
     elseif cmd == "share" then
         QSB.ShareZone()
     elseif cmd == "route" or cmd == "go" then
@@ -710,6 +713,7 @@ local function Slash(msg)
         Print("/qsb tracker - hide Blizzard's quest tracker (" .. OnOff(s.hideTracker) .. ")")
         Print("/qsb objectives - show objective lines (" .. OnOff(s.showObjectives) .. ")")
         Print("/qsb settings - open the settings (or click the cog on the window)")
+        Print("/qsb turnin - show the Turn in tab (every finished quest)")
         Print("/qsb share - share all your quests for this zone with your party")
         Print("/qsb route - fastest route to your tracked quest in this zone (or Ctrl-click any quest)")
         Print("/qsb autoshare - share quests you pick up with your party (" .. OnOff(s.autoShare) .. ")")

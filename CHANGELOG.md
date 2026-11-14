@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.0 - 2026-11-14
+
+- New **Turn in** tab. It lists every finished quest from every zone, grouped by zone, with the zone you're in at the top.
+  - Each quest says who to hand it to when the game provides it, and has the fastest-route button, so you can plan a hand-in run.
+  - The tab shows how many quests are ready, for example **Turn in 3**.
+  - `/qsb turnin` opens it.
+- The tabs are a little narrower so all three fit. The narrowest the window can go is now 250 wide (it was 230); a smaller saved size widens to fit.
+
 ## 1.7.0 - 2026-11-14
 
 - **Fastest route to a quest.** Each quest has a small map button, and the right-click menu now starts with **Fastest route there**. Ctrl-clicking a quest does the same, and `/qsb route` routes to your tracked quest in the zone you're in.

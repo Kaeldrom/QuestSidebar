@@ -12,7 +12,7 @@ local UI = {}
 QSB.UI = UI
 
 local DEFAULT_W, DEFAULT_H = 300, 460
-local MIN_W, MIN_H, MAX_W, MAX_H = 230, 180, 700, 1200
+local MIN_W, MIN_H, MAX_W, MAX_H = 250, 180, 700, 1200
 local HEADER_H = 24
 local SHARE_H = 22
 local SEARCH_H = 20
@@ -33,7 +33,7 @@ local ICON_OPEN = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up"
 local ICON_ROUTE = "Interface\\Icons\\INV_Misc_Map_01"
 
 local db
-local panel, scroll, content, tabZone, tabAll, empty
+local panel, scroll, content, tabZone, tabAll, tabTurnIn, empty
 local headers, quests, sections = {}, {}, {}
 local scrollY = 0
 UI.tab = "zone"
@@ -387,6 +387,14 @@ function UI.Draw(groups)
     if UI.SetTitle then UI.SetTitle("Quests  " .. countColor .. total .. "/" .. max .. "|r") end
     UI.logFull = total >= max
 
+    -- the Turn in tab shows how many are ready
+    local readyCount = 0
+    for _, g in ipairs(groups) do readyCount = readyCount + (g.done or 0) end
+    UI.readyCount = readyCount
+    if tabTurnIn then
+        tabTurnIn:SetText(readyCount > 0 and ("Turn in |cff40ff40" .. readyCount .. "|r") or "Turn in")
+    end
+
     -- hide grey quests (setting); ones ready to hand in always stay
     local hideGrey = db.settings.hideGrey
     local function Visible(list)
@@ -406,7 +414,7 @@ function UI.Draw(groups)
         h:ClearAllPoints()
         h:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
         -- in All, the zone you're in reads gold; pinned zones say so
-        local name = (g.zone == here and UI.tab == "all") and ("|cffffd100" .. g.zone .. "|r") or g.zone
+        local name = (g.zone == here and UI.tab ~= "zone") and ("|cffffd100" .. g.zone .. "|r") or g.zone
         h.text:SetText(name .. (db.pinned[g.zone] and "|cff66ddff  (pinned)|r" or ""))
         h.count:SetText((g.done > 0 and (GREEN .. g.done .. "|r/") or "") .. #g.quests)
         h.open = open
@@ -499,6 +507,27 @@ function UI.Draw(groups)
             empty:SetText(GREY .. "No quests for " .. (here or "this zone") .. ".|r\n\n" .. "Open the |cffffd100All|r tab to see your other quests.")
             empty:Show()
         end
+    elseif UI.tab == "turnin" then
+        -- every finished quest, by zone; the zone you're in first
+        local list = {}
+        for _, g in ipairs(groups) do
+            local ready = {}
+            for _, q in ipairs(g.quests) do if q.complete then ready[#ready + 1] = q end end
+            if #ready > 0 then
+                local entry = { zone = g.zone, quests = ready, done = #ready }
+                if g.zone == here then table.insert(list, 1, entry) else list[#list + 1] = entry end
+            end
+        end
+        for _, g in ipairs(list) do
+            Header(g, true)
+            for _, q in ipairs(g.quests) do Quest(q, true) end
+        end
+        if #list == 0 then
+            empty:ClearAllPoints()
+            empty:SetPoint("TOPLEFT", 8, -12)
+            empty:SetText(GREY .. "Nothing to turn in yet.|r\n\n" .. "Finished quests show up here, wherever they are.")
+            empty:Show()
+        end
     else
         if search then
             search:ClearAllPoints()
@@ -575,7 +604,8 @@ end
 function UI.SelectTab(tab)
     UI.tab = tab
     scrollY = 0
-    if tab == "zone" then tabZone:Disable(); tabAll:Enable() else tabZone:Enable(); tabAll:Disable() end
+    tabZone:Enable(); tabAll:Enable(); tabTurnIn:Enable()
+    if tab == "zone" then tabZone:Disable() elseif tab == "turnin" then tabTurnIn:Disable() else tabAll:Disable() end
     QSB.Refresh()
 end
 
@@ -775,6 +805,8 @@ function UI.ToggleSettings()
 end
 function UI.Settings() return settings end -- tests
 
+function UI.IsShown() return panel ~= nil and panel:IsShown() and true or false end
+
 function UI.ToggleShown()
     if panel:IsShown() then panel:Hide() else panel:Show() end
 end
@@ -806,7 +838,7 @@ end
 function UI.ApplyMinimized()
     if not panel then return end
     local m = db.minimized and true or false
-    for _, f in ipairs({ tabZone, tabAll, scroll, UI.grip }) do
+    for _, f in ipairs({ tabZone, tabAll, tabTurnIn, scroll, UI.grip }) do
         if f then if m then f:Hide() else f:Show() end end
     end
     if type(panel.Inset) == "table" and panel.Inset.Hide then
@@ -914,6 +946,7 @@ function UI.Init(savedDB)
     end
     panel = f
     local size = db.size or { DEFAULT_W, DEFAULT_H }
+    if size[1] < MIN_W then size[1] = MIN_W end
     panel:SetSize(size[1], size[2])
     panel:SetFrameStrata("MEDIUM")
     panel:SetClampedToScreen(true)
@@ -936,15 +969,28 @@ function UI.Init(savedDB)
 
     -- tabs
     tabZone = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    tabZone:SetSize(110, 22)
+    tabZone:SetSize(100, 22)
     tabZone:SetPoint("TOPLEFT", 10, -28)
     tabZone:SetText("Current Zone")
     tabZone:SetScript("OnClick", function() UI.SelectTab("zone") end)
     tabAll = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    tabAll:SetSize(60, 22)
-    tabAll:SetPoint("LEFT", tabZone, "RIGHT", 4, 0)
+    tabAll:SetSize(44, 22)
+    tabAll:SetPoint("LEFT", tabZone, "RIGHT", 3, 0)
     tabAll:SetText("All")
     tabAll:SetScript("OnClick", function() UI.SelectTab("all") end)
+    tabTurnIn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    tabTurnIn:SetSize(84, 22)
+    tabTurnIn:SetPoint("LEFT", tabAll, "RIGHT", 3, 0)
+    tabTurnIn:SetText("Turn in")
+    tabTurnIn:SetScript("OnClick", function() UI.SelectTab("turnin") end)
+    tabTurnIn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Turn in")
+        GameTooltip:AddLine("Every finished quest, wherever it is, with who to hand it to.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    tabTurnIn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    UI.tabTurnIn = tabTurnIn
 
     -- scrolling list
     scroll = CreateFrame("ScrollFrame", nil, panel)

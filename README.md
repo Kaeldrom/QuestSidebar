@@ -21,6 +21,7 @@ By default it hides Blizzard's quest tracker so the two don't overlap (`/qsb tra
 | `/qsb autoshare` | Share quests you pick up with your party on/off (off by default, also in settings) |
 | `/qsb grey` | Hide grey (low level) quests on/off |
 | `/qsb route` | Fastest route to your tracked quest here (or Ctrl-click any quest, or use its map button). Full routes need Shortest Path Forever |
+| `/qsb turnin` | Open the Turn in tab: every finished quest, wherever it is |
 | `/qsb min` | Minimize to the title bar / restore |
 | `/qsb minimap` | Minimap button on/off |
 | `/qsb settings` | Open the settings (same as the cog in the title bar) |
