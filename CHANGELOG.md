@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.0 - 2026-11-14
+
+- **Fastest route to a quest.** Each quest has a small map button, and the right-click menu now starts with **Fastest route there**. Ctrl-clicking a quest does the same, and `/qsb route` routes to your tracked quest in the zone you're in.
+  - With [Shortest Path Forever](https://www.curseforge.com/wow/addons/shortest-path-forever) installed, it plans the quickest journey: walking, flight paths, boats, zeppelins, lifts, the tram, portals and teleports. It takes you to the quest's objective area, or to the turn-in NPC once the quest is done.
+  - Without it, the quest becomes your tracked quest and the game's own arrow points the way, in a straight line only.
+
 ## 1.6.0 - 2026-11-14
 
 - Finished quests stand out much more in the **Current Zone** tab:

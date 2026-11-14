@@ -30,6 +30,7 @@ local TAG = "|cff4fd24f"
 local ICON_INCOMPLETE = "Interface\\GossipFrame\\IncompleteQuestIcon"
 local ICON_COMPLETE = "Interface\\GossipFrame\\ActiveQuestIcon"
 local ICON_OPEN = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up"
+local ICON_ROUTE = "Interface\\Icons\\INV_Misc_Map_01"
 
 local db
 local panel, scroll, content, tabZone, tabAll, empty
@@ -77,6 +78,7 @@ end
 function UI.MenuItems(q)
     local items = {}
     local function Add(text, func, disabled) items[#items + 1] = { text = text, func = func, disabled = disabled } end
+    Add(QSB.HasRouter() and "|cffffd100Fastest route there|r" or "Point me there (quest arrow)", function() QSB.RouteTo(q) end)
     Add(q.tracked and "Stop tracking" or "Track", function() QSB.ToggleTrack(q) end)
     local canShare = QSB.CanPush(q)
     Add(canShare and "Share with party" or (QSB.InGroup() and "Can't be shared" or "Share with party (not in a party)"),
@@ -239,13 +241,37 @@ local function NewQuest()
     end)
     r.open:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+    -- fastest route (Shortest Path Forever) / quest arrow
+    r.route = CreateFrame("Button", nil, r)
+    r.route:SetSize(16, 16)
+    r.route:SetPoint("RIGHT", r.open, "LEFT", -2, 0)
+    r.route.icon = r.route:CreateTexture(nil, "ARTWORK")
+    r.route.icon:SetAllPoints()
+    r.route.icon:SetTexture(ICON_ROUTE)
+    r.route.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    r.route:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    r.route:SetScript("OnClick", function(self) QSB.RouteTo(self:GetParent().quest) end)
+    r.route:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        if QSB.HasRouter() then
+            GameTooltip:AddLine("Fastest route there")
+            GameTooltip:AddLine("Plans the quickest way: walking, flight paths, boats, zeppelins and portals (Shortest Path Forever).", 0.8, 0.8, 0.8, true)
+        else
+            GameTooltip:AddLine("Point me there")
+            GameTooltip:AddLine("Uses the game's quest arrow. Install Shortest Path Forever for full routes with flights, boats and portals.", 0.8, 0.8, 0.8, true)
+        end
+        GameTooltip:Show()
+    end)
+    r.route:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     r.tag = r:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    r.tag:SetPoint("RIGHT", r.open, "LEFT", -2, 0)
+    r.tag:SetPoint("RIGHT", r.route, "LEFT", -2, 0)
     r.tag:SetJustifyH("RIGHT")
 
     r:SetScript("OnClick", function(self, button)
         local q = self.quest
         if IsModifiedClick and IsModifiedClick("CHATLINK") then QSB.LinkQuest(q)
+        elseif IsControlKeyDown and IsControlKeyDown() and button == "LeftButton" then QSB.RouteTo(q)
         elseif button == "RightButton" then ShowMenu(self, q)
         else QSB.ToggleQuest(q) end
     end)
@@ -257,7 +283,7 @@ local function NewQuest()
             if #q.party.have > 0 then GameTooltip:AddLine("Party on this quest: " .. table.concat(q.party.have, ", "), 0.4, 0.87, 1, true) end
             if #q.party.missing > 0 then GameTooltip:AddLine("Doesn't have it: " .. table.concat(q.party.missing, ", "), 0.6, 0.6, 0.6, true) end
         end
-        GameTooltip:AddLine("Click: show/hide objectives   Shift-click: link in chat   Right-click: menu", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Click: show/hide objectives   Ctrl-click: fastest route   Shift-click: link in chat   Right-click: menu", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -284,7 +310,7 @@ local function FillQuest(r, q, width, showDetails)
     end
     r.tag:SetText(tag)
     local tagW = tag ~= "" and ((r.tag:GetStringWidth() or 0) + 4) or 0
-    r.title:SetWidth(width - 30 - 46 - tagW)
+    r.title:SetWidth(width - 30 - 64 - tagW)
     r.title:SetText(LevelColor(q.level) .. "[" .. (q.level or "?") .. "] " .. q.title .. "|r")
     r.track:SetChecked(q.tracked)
     -- finished: stronger wash + gold edge in Current Zone, a lighter wash in All

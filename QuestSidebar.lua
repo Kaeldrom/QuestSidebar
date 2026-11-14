@@ -296,6 +296,50 @@ end
 QSB.OnZoneChanged = OnZoneChanged
 
 ---------------------------------------------------------------------------
+-- Fastest route to a quest
+---------------------------------------------------------------------------
+-- With Shortest Path Forever installed, its "travel to my tracked quest" plans the
+-- quickest journey: walking, flight paths, boats, zeppelins, lifts, the tram,
+-- portals and teleports, to the objective area (or the turn-in NPC once the quest
+-- is done). We make the quest the tracked one and start that journey.
+-- Without it, the game's own quest arrow points the way (straight line only).
+local SPF_BUTTON = "ShortestPathForeverTravelToTrackedQuestButton"
+
+function QSB.HasRouter()
+    local b = _G[SPF_BUTTON]
+    return type(b) == "table" and b.Click ~= nil
+end
+
+local function SuperTrack(questID)
+    if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then
+        C_SuperTrack.SetSuperTrackedQuestID(questID)
+        return true
+    end
+    return false
+end
+
+function QSB.RouteTo(q)
+    if not q or not q.questID or q.questID == 0 then return nil end
+    if InCombatLockdown and InCombatLockdown() then
+        Print("Routes can't be planned in combat. Try again once it's over.")
+        return nil
+    end
+    if QSB.HasRouter() then
+        SuperTrack(q.questID)
+        if not q.tracked then QSB.ToggleTrack(q) end -- so it shows in the tracker too
+        _G[SPF_BUTTON]:Click("LeftButton")
+        return "route"
+    end
+    if SuperTrack(q.questID) then
+        if not q.tracked then QSB.ToggleTrack(q) end
+        Print("Following " .. q.title .. " with the game's quest arrow. Install Shortest Path Forever for full routes with flight paths, boats and portals.")
+        return "arrow"
+    end
+    Print("No way to point you to that quest on this client. Shortest Path Forever adds full routes.")
+    return nil
+end
+
+---------------------------------------------------------------------------
 -- Actions on a quest
 ---------------------------------------------------------------------------
 function QSB.OpenQuest(q)
@@ -618,6 +662,15 @@ local function Slash(msg)
         Print("Minimap button: " .. OnOff(s.minimap))
     elseif cmd == "share" then
         QSB.ShareZone()
+    elseif cmd == "route" or cmd == "go" then
+        -- the quest you're tracking at the top of this zone, else the first one here
+        local g = QSB.HereGroup(QSB.ReadLog())
+        local pick
+        for _, q in ipairs(g and g.quests or {}) do
+            if q.tracked then pick = q; break end
+        end
+        pick = pick or (g and g.quests[1])
+        if pick then QSB.RouteTo(pick) else Print("No quests here to route to.") end
     elseif cmd == "autoshare" then
         s.autoShare = not s.autoShare
         Print("Auto-share new quests with your party: " .. OnOff(s.autoShare))
@@ -658,6 +711,7 @@ local function Slash(msg)
         Print("/qsb objectives - show objective lines (" .. OnOff(s.showObjectives) .. ")")
         Print("/qsb settings - open the settings (or click the cog on the window)")
         Print("/qsb share - share all your quests for this zone with your party")
+        Print("/qsb route - fastest route to your tracked quest in this zone (or Ctrl-click any quest)")
         Print("/qsb autoshare - share quests you pick up with your party (" .. OnOff(s.autoShare) .. ")")
         Print("/qsb grey - hide grey (low level) quests (" .. OnOff(s.hideGrey) .. ")")
         Print("/qsb min - minimize/restore   /qsb minimap - minimap button on/off")

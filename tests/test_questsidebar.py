@@ -437,19 +437,19 @@ check("only missing quests pushed", sorted(pushes()) == [2, 5])
 lua.execute("PUSHES = {}; local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Kolkar') then r = q end end; r.scripts.OnClick(r, 'RightButton')")
 items = [ (i.text, i.enabled) for i in lua.eval("MENU.items").values() ]
 check("menu title", lua.eval("MENU.title") == "Kolkar Leaders")
-check("menu items", [t for t, _ in items][:4] == ["Track", "Share with party", "Link in chat", "Show in quest log"] and "Abandon" in items[4][0])
+check("menu items", [t for t, _ in items][1:5] == ["Track", "Share with party", "Link in chat", "Show in quest log"] and "Abandon" in items[5][0])
 check("right-click no longer just tracks", lua.eval("WATCHED[5]") is None)
-lua.execute("MENU.items[1].func()"); lua.execute("run_timers()")
-check("menu: track", lua.eval("WATCHED[5]") is True)
 lua.execute("MENU.items[2].func()"); lua.execute("run_timers()")
+check("menu: track", lua.eval("WATCHED[5]") is True)
+lua.execute("MENU.items[3].func()"); lua.execute("run_timers()")
 check("menu: share one quest", pushes() == [5] and "Shared Kolkar Leaders with your party" in last_print())
-lua.execute("MENU.items[5].func()")
+lua.execute("MENU.items[6].func()")
 check("abandon asks first", lua.eval("POPUP.which") == "QUESTSIDEBAR_ABANDON" and lua.eval("POPUP.text") == "Kolkar Leaders" and lua.eval("#ABANDONED") == 0)
 lua.execute("StaticPopupDialogs.QUESTSIDEBAR_ABANDON.OnAccept(POPUP, POPUP.data)")
 check("abandon after yes", list(lua.eval("ABANDONED").values()) == [5])
 lua.execute("GROUP = false; PARTY = {}; QuestSidebar.Refresh()")
 lua.execute("local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Kolkar') then r = q end end; r.scripts.OnClick(r, 'RightButton')")
-check("menu: share greyed out when solo", lua.eval("MENU.items[2].enabled") is False and "not in a party" in lua.eval("MENU.items[2].text"))
+check("menu: share greyed out when solo", lua.eval("MENU.items[3].enabled") is False and "not in a party" in lua.eval("MENU.items[3].text"))
 check("no party markers when solo", row("Kolkar").tag.text == "")
 
 # ---- auto-share (off by default) --------------------------------------------------------------
@@ -538,6 +538,38 @@ check("no sections when nothing is finished", sections() == [])
 
 lua.execute("TURNIN = {}; for _, e in ipairs(LOG) do if e.questID == 5 then e.isComplete = true end end; QuestSidebar.Refresh()")
 check("no turn-in text: falls back to summary", row("Kolkar").details.text in ("", None) or row("Kolkar").details.shown is False)
+
+# ---- 1.7.0: fastest route ------------------------------------------------------------------
+reset_log()
+lua.execute("""SUPER = nil; ROUTES = 0; CTRL = false
+function IsControlKeyDown() return CTRL end
+C_SuperTrack = { SetSuperTrackedQuestID = function(id) SUPER = id end }
+WATCHED = {}
+ZONE = 'The Barrens'; QuestSidebar.UI.SelectTab('zone')""")
+ev("ZONE_CHANGED_NEW_AREA"); lua.execute("run_timers()")
+
+# without Shortest Path Forever: the game's quest arrow
+check("no router detected", lua.eval("QuestSidebar.HasRouter()") is False)
+lua.execute("local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Raptor') then r = q end end; r.route.scripts.OnClick(r.route)")
+check("fallback: super-tracks the quest", lua.eval("SUPER") == 3 and lua.eval("WATCHED[3]") is True)
+check("fallback: says to install SPF", "Shortest Path Forever" in last_print())
+lua.execute("local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Kolkar') then r = q end end; r.scripts.OnClick(r, 'RightButton')")
+check("menu: arrow item first without SPF", "quest arrow" in lua.eval("MENU.items[1].text"))
+
+# with Shortest Path Forever
+lua.execute("""ShortestPathForeverTravelToTrackedQuestButton = CreateFrame('Button')
+ShortestPathForeverTravelToTrackedQuestButton.Click = function(self, b) ROUTES = ROUTES + 1; ROUTED = SUPER end""")
+check("router detected", lua.eval("QuestSidebar.HasRouter()") is True)
+lua.execute("local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Kolkar') then r = q end end; r.scripts.OnClick(r, 'RightButton')")
+check("menu: fastest route first", "Fastest route there" in lua.eval("MENU.items[1].text"))
+lua.execute("MENU.items[1].func()")
+check("route: SPF journey to that quest", lua.eval("ROUTES") == 1 and lua.eval("ROUTED") == 5)
+lua.execute("CTRL = true; local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Plainstrider') then r = q end end; r.scripts.OnClick(r, 'LeftButton'); CTRL = false")
+check("ctrl-click routes", lua.eval("ROUTES") == 2 and lua.eval("ROUTED") == 2)
+lua.execute("WATCHED = { [3] = true }; QuestSidebar.Refresh(); SlashCmdList.QUESTSIDEBAR('route')")
+check("/qsb route picks the tracked quest", lua.eval("ROUTES") == 3 and lua.eval("ROUTED") == 3)
+lua.execute("COMBAT = true; QuestSidebar.RouteTo({ questID = 1, title = 'x' }); COMBAT = false")
+check("no routing in combat", lua.eval("ROUTES") == 3 and "combat" in last_print())
 
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
