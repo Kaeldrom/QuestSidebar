@@ -259,7 +259,7 @@ run("LOG = {}; QuestSidebar.UI.SelectTab('all')")
 check("empty log", "empty" in lua.eval("QuestSidebar.UI.Empty().text"))
 
 # settings + opacity
-check("cog is discreet", lua.eval("QuestSidebar.UI.cog.alpha") == 0.45)
+check("cog is discreet", lua.eval("QuestSidebar.UI.cog.alpha") == 0.6)
 lua.execute("QuestSidebar.UI.cog.scripts.OnClick(QuestSidebar.UI.cog)")
 check("cog opens settings", lua.eval("QuestSidebarSettings:IsShown()"))
 op = lua.eval("QuestSidebarSettings.items[1]")

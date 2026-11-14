@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1 - 2026-11-14
+
+- The settings button is now a proper cog symbol. It is gold when you hover over it.
+
 ## 1.3.0 - 2026-11-14
 
 - The close X is replaced by a **minimize** button. It shrinks the window to its title bar, and clicking again restores it to the size you chose. `/qsb min` does the same.
