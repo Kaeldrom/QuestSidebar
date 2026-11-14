@@ -25,7 +25,12 @@ function Widget:GetScript(k) return self.scripts[k] end
 function Widget:HookScript(k, fn) self.scripts[k] = fn end
 function Widget:RegisterEvent(e) self.events[e] = true end
 function Widget:CreateFontString() return CreateFrame("FontString") end
-function Widget:CreateTexture() return CreateFrame("Texture") end
+function Widget:CreateTexture() local t = CreateFrame("Texture"); self.regions = self.regions or {}; table.insert(self.regions, t); return t end
+function Widget:GetRegions() return unpack(self.regions or {}) end
+function Widget:GetObjectType() return self.kind end
+function Widget:SetAlpha(a) self.alpha = a end
+function Widget:GetMinMaxValues() return self.min or 0, self.max or 1 end
+function Widget:GetValue() return self.value end
 function Widget:SetText(t) self.text = t end
 function Widget:GetText() return self.text or "" end
 function Widget:GetStringHeight() local n = 1; for _ in (self.text or ""):gmatch("\n") do n = n + 1 end; return n * 14 end
@@ -44,7 +49,7 @@ function Widget:SetChecked(v) self.checked = v end
 function Widget:GetChecked() return self.checked end
 function Widget:SetVerticalScroll(v) self.vscroll = v end
 function Widget:SetMinMaxValues(a, b) self.min, self.max = a, b end
-function Widget:SetValue(v) self.value = v end
+function Widget:SetValue(v) self.value = v; if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self, v) end end
 function Widget:SetTexture(t) self.texture = t end
 function Widget:Disable() self.disabled = true end
 function Widget:Enable() self.disabled = false end
@@ -54,7 +59,7 @@ function CreateFrame(kind, name, parent)
   if name then _G[name] = f end
   return f
 end
-UIParent = CreateFrame("Frame"); GameTooltip = CreateFrame("GameTooltip")
+UIParent = CreateFrame("Frame"); GameTooltip = CreateFrame("GameTooltip"); tinsert = table.insert; UISpecialFrames = {}
 ObjectiveTrackerFrame = CreateFrame("Frame"); ObjectiveTrackerFrame.shown = true
 function InCombatLockdown() return COMBAT end
 SHIFT = false
@@ -175,7 +180,9 @@ check("zones closed away from them", qrows() == [])
 run("ZONE = 'The Barrens'"); ev("ZONE_CHANGED_NEW_AREA")
 check("current zone auto-opens in All", has("Raptor Thieves") and not has("Stonetalon"))
 check("all tab: no details text", row("Raptor Thieves").details.text == "")
-check("open/close icons", header("The Barrens").toggle.texture.endswith("MinusButton-Up") and header("Ashenvale").toggle.texture.endswith("PlusButton-Up"))
+check("dash when open, plus when closed", header("The Barrens").plus.shown is False and header("Ashenvale").plus.shown is True)
+check("zone bar has a bronze frame", len(header("Ashenvale").border) == 4)
+check("current zone gold in All", "|cffffd100The Barrens" in header("The Barrens").text.text)
 header("Blackfathom Deeps").scripts["OnClick"](header("Blackfathom Deeps"))
 q = row("Essence")
 check("dungeon tag", q is not None and "(Dungeon)" in q.tag.text)
@@ -240,6 +247,34 @@ run("SlashCmdList.QUESTSIDEBAR('help')")
 
 run("LOG = {}; QuestSidebar.UI.SelectTab('all')")
 check("empty log", "empty" in lua.eval("QuestSidebar.UI.Empty().text"))
+
+# settings + opacity
+check("cog is discreet", lua.eval("QuestSidebar.UI.cog.alpha") == 0.45)
+lua.execute("QuestSidebar.UI.cog.scripts.OnClick(QuestSidebar.UI.cog)")
+check("cog opens settings", lua.eval("QuestSidebarSettings:IsShown()"))
+op = lua.eval("QuestSidebarSettings.items[1]")
+check("opacity slider starts at 100%", "100%" in op.label.text)
+lua.execute("QuestSidebarSettings.items[1].slider:SetValue(0.5)")
+check("opacity saved", abs(lua.eval("QuestSidebarDB.settings.opacity") - 0.5) < 1e-9 and "50%" in lua.eval("QuestSidebarSettings.items[1]").label.text)
+regs = [r for r in lua.eval("{QuestSidebarFrame:GetRegions()}").values() if r.kind == "Texture"]
+check("window background faded", all(abs((r.alpha or 1) - 0.5) < 1e-9 for r in regs))
+check("zone bars faded", all(abs(h.bar.alpha - 0.5) < 1e-9 for h in lua.eval("QuestSidebar.UI.Headers()").values()))
+check("text not faded", all(getattr(h.text, "alpha", None) is None for h in lua.eval("QuestSidebar.UI.Headers()").values()))
+lua.execute("QuestSidebarSettings.items[1].slider:SetValue(0.02)")
+lua.execute("QuestSidebarSettings.items[1].slider.scripts.OnMouseWheel(QuestSidebarSettings.items[1].slider, -5)")
+check("wheel clamps to min", lua.eval("QuestSidebarSettings.items[1].slider.value") >= 0)
+lua.execute("SlashCmdList.QUESTSIDEBAR('opacity 70')")
+check("/qsb opacity 70", abs(lua.eval("QuestSidebarDB.settings.opacity") - 0.7) < 1e-9)
+chk = lua.eval("QuestSidebarSettings.items[4]")
+lua.execute("local c = QuestSidebarSettings.items[4]; c:SetChecked(false); c.scripts.OnClick(c)")
+check("objectives checkbox", lua.eval("QuestSidebarDB.settings.showObjectives") is False)
+lua.execute("local c = QuestSidebarSettings.items[4]; c:SetChecked(true); c.scripts.OnClick(c)")
+lua.execute("local c = QuestSidebarSettings.items[5]; c:SetChecked(false); c.scripts.OnClick(c)")
+check("tracker checkbox brings tracker back", lua.eval("ObjectiveTrackerFrame:IsShown()"))
+lua.execute("QuestSidebar.UI.ToggleSettings()")
+check("cog closes settings", not lua.eval("QuestSidebarSettings:IsShown()"))
+lua.execute("SlashCmdList.QUESTSIDEBAR('settings')")
+check("/qsb settings opens", lua.eval("QuestSidebarSettings:IsShown()"))
 
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

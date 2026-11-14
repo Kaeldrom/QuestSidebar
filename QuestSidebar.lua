@@ -13,7 +13,7 @@ local ADDON = ...
 local QSB = {}
 QuestSidebar = QSB
 
-local DEFAULTS = { autoZone = true, hideTracker = true, locked = false, scale = 1, showObjectives = true }
+local DEFAULTS = { autoZone = true, hideTracker = true, locked = false, scale = 1, showObjectives = true, opacity = 1 }
 
 local db
 QSB.open = {}          -- zones opened by hand this visit (cleared when you change zone)
@@ -321,6 +321,14 @@ local function Slash(msg)
     local s = db.settings
     if cmd == "" or cmd == "toggle" then
         QSB.UI.ToggleShown()
+    elseif cmd == "settings" or cmd == "options" or cmd == "config" then
+        QSB.UI.ToggleSettings()
+    elseif cmd == "opacity" and tonumber(arg) then
+        local v = tonumber(arg)
+        if v > 1 then v = v / 100 end
+        s.opacity = math.max(0.1, math.min(1, v))
+        QSB.UI.ApplyOpacity()
+        Print("Opacity " .. math.floor(s.opacity * 100 + 0.5) .. "%")
     elseif cmd == "auto" then
         s.autoZone = not s.autoZone
         Print("Open the zone you're in automatically: " .. OnOff(s.autoZone))
@@ -350,7 +358,8 @@ local function Slash(msg)
         Print("/qsb auto - open the zone you're in automatically (" .. OnOff(s.autoZone) .. ")")
         Print("/qsb tracker - hide Blizzard's quest tracker (" .. OnOff(s.hideTracker) .. ")")
         Print("/qsb objectives - show objective lines (" .. OnOff(s.showObjectives) .. ")")
-        Print("/qsb lock | scale 0.8 | reset")
+        Print("/qsb settings - open the settings (or click the cog on the window)")
+        Print("/qsb opacity 70 | lock | scale 0.8 | reset")
         Print("Click a zone to open/close it, Shift-click to pin it open. Click a quest to open it, Shift-click to link, right-click to track.")
     end
 end

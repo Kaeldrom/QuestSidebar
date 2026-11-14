@@ -23,8 +23,6 @@ local TAG = "|cff4fd24f"
 
 local ICON_INCOMPLETE = "Interface\\GossipFrame\\IncompleteQuestIcon"
 local ICON_COMPLETE = "Interface\\GossipFrame\\ActiveQuestIcon"
-local ICON_PLUS = "Interface\\Buttons\\UI-PlusButton-Up"
-local ICON_MINUS = "Interface\\Buttons\\UI-MinusButton-Up"
 local ICON_OPEN = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up"
 
 local db
@@ -50,38 +48,63 @@ local function Width()
     return math.max(MIN_W, (db and db.size and db.size[1]) or DEFAULT_W) - 34
 end
 
-local function SetGradient(tex, r1, g1, b1, a1, r2, g2, b2, a2)
+local function SetGradient(tex, orient, r1, g1, b1, a1, r2, g2, b2, a2)
     tex:SetColorTexture(1, 1, 1, 1)
-    local ok = CreateColor and pcall(tex.SetGradient, tex, "HORIZONTAL", CreateColor(r1, g1, b1, a1), CreateColor(r2, g2, b2, a2))
+    local ok = CreateColor and pcall(tex.SetGradient, tex, orient, CreateColor(r1, g1, b1, a1), CreateColor(r2, g2, b2, a2))
     if not ok then tex:SetColorTexture(r1, g1, b1, a1) end
 end
 
 ---------------------------------------------------------------------------
 -- pooled rows
 ---------------------------------------------------------------------------
+-- Zone bar, after the world-map quest log: a dark brown bar with a thin bronze
+-- frame, the zone name in large off-white text, and a flat yellow - / + on the right.
+local BRONZE = { 0.58, 0.45, 0.25, 1 }
+
 local function NewHeader()
     local h = CreateFrame("Button", nil, content)
     h:SetHeight(HEADER_H)
     h.bar = h:CreateTexture(nil, "BACKGROUND")
-    h.bar:SetAllPoints()
-    SetGradient(h.bar, 0.30, 0.30, 0.30, 0.95, 0.14, 0.14, 0.14, 0.90)
-    h.edge = h:CreateTexture(nil, "BORDER")
-    h.edge:SetPoint("BOTTOMLEFT")
-    h.edge:SetPoint("BOTTOMRIGHT")
-    h.edge:SetHeight(1)
-    h.edge:SetColorTexture(0, 0, 0, 0.8)
+    h.bar:SetPoint("TOPLEFT", 1, -1)
+    h.bar:SetPoint("BOTTOMRIGHT", -1, 1)
+    -- warm brown at the top fading to near-black
+    SetGradient(h.bar, "VERTICAL", 0.06, 0.04, 0.02, 0.96, 0.21, 0.15, 0.08, 0.96)
+    h.border = {}
+    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local t = h:CreateTexture(nil, "BORDER")
+        t:SetColorTexture(BRONZE[1], BRONZE[2], BRONZE[3], BRONZE[4])
+        if side == "TOP" or side == "BOTTOM" then
+            t:SetPoint(side .. "LEFT", 1, 0)
+            t:SetPoint(side .. "RIGHT", -1, 0)
+            t:SetHeight(1)
+        else
+            t:SetPoint("TOP" .. side, 0, -1)
+            t:SetPoint("BOTTOM" .. side, 0, 1)
+            t:SetWidth(1)
+        end
+        h.border[#h.border + 1] = t
+    end
     local hl = h:CreateTexture(nil, "HIGHLIGHT")
-    hl:SetAllPoints()
-    hl:SetColorTexture(1, 1, 1, 0.06)
-    h.text = h:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    h.text:SetPoint("LEFT", 8, 0)
+    hl:SetPoint("TOPLEFT", 1, -1)
+    hl:SetPoint("BOTTOMRIGHT", -1, 1)
+    hl:SetColorTexture(1, 0.85, 0.5, 0.07)
+    h.text = h:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
+    h.text:SetPoint("LEFT", 7, 0)
+    h.text:SetPoint("RIGHT", -52, 0)
     h.text:SetJustifyH("LEFT")
     h.text:SetWordWrap(false)
-    h.count = h:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    h.count:SetPoint("RIGHT", -28, 0)
-    h.toggle = h:CreateTexture(nil, "ARTWORK")
-    h.toggle:SetSize(16, 16)
-    h.toggle:SetPoint("RIGHT", -6, 0)
+    h.text:SetTextColor(0.93, 0.91, 0.86)
+    h.count = h:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    h.count:SetPoint("RIGHT", -26, 0)
+    -- flat yellow dash; a second bar turns it into a plus when closed
+    h.dash = h:CreateTexture(nil, "ARTWORK")
+    h.dash:SetSize(11, 3)
+    h.dash:SetPoint("RIGHT", -9, 0)
+    h.dash:SetColorTexture(1, 0.82, 0, 1)
+    h.plus = h:CreateTexture(nil, "ARTWORK")
+    h.plus:SetSize(3, 11)
+    h.plus:SetPoint("CENTER", h.dash, "CENTER")
+    h.plus:SetColorTexture(1, 0.82, 0, 1)
     h:RegisterForClicks("LeftButtonUp")
     h:SetScript("OnClick", function(self)
         if IsShiftKeyDown() then QSB.TogglePin(self.zone) else QSB.ToggleZone(self.zone) end
@@ -252,10 +275,13 @@ function UI.Draw(groups)
         h:SetWidth(width)
         h:ClearAllPoints()
         h:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
-        local mark = (g.zone == here and UI.tab == "all") and (GREEN .. "  •|r") or (db.pinned[g.zone] and "|cff66ddff  •|r" or "")
-        h.text:SetText(g.zone .. mark)
-        h.count:SetText(GREY .. (g.done > 0 and (g.done .. "/") or "") .. #g.quests .. "|r")
-        h.toggle:SetTexture(open and ICON_MINUS or ICON_PLUS)
+        -- in All, the zone you're in reads gold; pinned zones say so
+        local name = (g.zone == here and UI.tab == "all") and ("|cffffd100" .. g.zone .. "|r") or g.zone
+        h.text:SetText(name .. (db.pinned[g.zone] and "|cff66ddff  (pinned)|r" or ""))
+        h.count:SetText((g.done > 0 and (g.done .. "/") or "") .. #g.quests)
+        h.open = open
+        if open then h.plus:Hide() else h.plus:Show() end
+        h.bar:SetAlpha(math.max(0.35, db.settings.opacity or 1))
         h:Show()
         y = y + HEADER_H + 4
     end
@@ -383,6 +409,138 @@ end
 function UI.ApplyScale()
     if panel then panel:SetScale(db.settings.scale or 1) end
 end
+
+-- Opacity fades the window's background and zone bars; text, icons and buttons stay solid.
+local function FadeTextures(frame, a)
+    if not frame or not frame.GetRegions then return end
+    for _, r in ipairs({ frame:GetRegions() }) do
+        if r.GetObjectType and r:GetObjectType() == "Texture" then r:SetAlpha(a) end
+    end
+end
+
+function UI.ApplyOpacity()
+    if not panel then return end
+    local a = db.settings.opacity or 1
+    FadeTextures(panel, a)
+    if type(panel.Inset) == "table" then FadeTextures(panel.Inset, a) end
+    if UI.bar then FadeTextures(UI.bar, math.max(0.35, a)) end
+    for _, h in ipairs(headers) do h.bar:SetAlpha(math.max(0.35, a)) end
+end
+
+---------------------------------------------------------------------------
+-- Settings: a small panel that opens beside the window from the cog
+---------------------------------------------------------------------------
+local settings
+
+local function Slider(parent, label, minV, maxV, step, get, set, fmt)
+    local holder = CreateFrame("Frame", nil, parent)
+    holder:SetSize(196, 36)
+    holder.label = holder:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    holder.label:SetPoint("TOPLEFT", 0, 0)
+    local s = CreateFrame("Slider", nil, holder)
+    s:SetPoint("TOPLEFT", 2, -16)
+    s:SetSize(190, 12)
+    s:SetOrientation("HORIZONTAL")
+    s:SetMinMaxValues(minV, maxV)
+    s:SetValueStep(step)
+    if s.SetObeyStepOnDrag then s:SetObeyStepOnDrag(true) end
+    s:EnableMouseWheel(true)
+    local track = s:CreateTexture(nil, "BACKGROUND")
+    track:SetPoint("LEFT")
+    track:SetPoint("RIGHT")
+    track:SetHeight(4)
+    track:SetColorTexture(0.25, 0.2, 0.12, 1)
+    local thumb = s:CreateTexture(nil, "OVERLAY")
+    thumb:SetSize(10, 14)
+    thumb:SetColorTexture(1, 0.82, 0, 1)
+    s:SetThumbTexture(thumb)
+    local function Show(v) holder.label:SetText(label .. ":  |cffffd100" .. fmt(v) .. "|r") end
+    s:SetScript("OnValueChanged", function(_, v)
+        v = math.floor(v / step + 0.5) * step
+        Show(v)
+        set(v)
+    end)
+    s:SetScript("OnMouseWheel", function(self, d)
+        local lo, hi = self:GetMinMaxValues()
+        self:SetValue(math.max(lo, math.min(hi, (self:GetValue() or lo) + d * step)))
+    end)
+    holder.slider = s
+    holder.Sync = function()
+        local v = get()
+        s:SetValue(v)
+        Show(v)
+    end
+    return holder
+end
+
+local function Check(parent, label, key, after)
+    local c = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    c:SetSize(22, 22)
+    c.label = c:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    c.label:SetPoint("LEFT", c, "RIGHT", 2, 0)
+    c.label:SetText(label)
+    c:SetScript("OnClick", function(self)
+        db.settings[key] = self:GetChecked() and true or false
+        if after then after() end
+        QSB.Refresh()
+    end)
+    c.Sync = function() c:SetChecked(db.settings[key]) end
+    return c
+end
+
+local function BuildSettings()
+    settings = CreateFrame("Frame", "QuestSidebarSettings", panel, "BackdropTemplate")
+    settings:SetSize(220, 252)
+    settings:SetPoint("TOPRIGHT", panel, "TOPLEFT", -2, 0)
+    settings:SetFrameStrata("HIGH")
+    settings:EnableMouse(true)
+    if settings.SetBackdrop then
+        settings:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 14,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 } })
+        settings:SetBackdropColor(0.06, 0.04, 0.02, 0.95)
+        settings:SetBackdropBorderColor(BRONZE[1], BRONZE[2], BRONZE[3], 1)
+    end
+    local t = settings:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    t:SetPoint("TOPLEFT", 12, -10)
+    t:SetText("Quest Sidebar settings")
+
+    local items = {}
+    items[#items + 1] = Slider(settings, "Opacity", 0.1, 1, 0.05,
+        function() return db.settings.opacity or 1 end,
+        function(v) db.settings.opacity = v; UI.ApplyOpacity() end,
+        function(v) return math.floor(v * 100 + 0.5) .. "%" end)
+    items[#items + 1] = Slider(settings, "Size", 0.6, 1.5, 0.05,
+        function() return db.settings.scale or 1 end,
+        function(v) db.settings.scale = v; UI.ApplyScale() end,
+        function(v) return math.floor(v * 100 + 0.5) .. "%" end)
+    items[#items + 1] = Check(settings, "Open the zone I'm in", "autoZone")
+    items[#items + 1] = Check(settings, "Show objectives", "showObjectives")
+    items[#items + 1] = Check(settings, "Hide Blizzard's tracker", "hideTracker", function() UI.ApplyTracker(true) end)
+    items[#items + 1] = Check(settings, "Lock position", "locked")
+
+    local y = -32
+    for _, it in ipairs(items) do
+        it:SetPoint("TOPLEFT", it.slider and 12 or 8, y)
+        y = y - (it.slider and 40 or 24)
+    end
+    local reset = CreateFrame("Button", nil, settings, "UIPanelButtonTemplate")
+    reset:SetSize(196, 20)
+    reset:SetPoint("TOPLEFT", 12, y - 6)
+    reset:SetText("Reset size & position")
+    reset:SetScript("OnClick", function() UI.ResetPosition(); QSB.Refresh() end)
+
+    settings.items = items
+    settings:SetScript("OnShow", function() for _, it in ipairs(items) do it.Sync() end end)
+    settings:Hide()
+    tinsert(UISpecialFrames, "QuestSidebarSettings")
+end
+
+function UI.ToggleSettings()
+    if not settings then BuildSettings() end
+    if settings:IsShown() then settings:Hide() else settings:Show() end
+end
+function UI.Settings() return settings end -- tests
 
 function UI.ToggleShown()
     if panel:IsShown() then panel:Hide() else panel:Show() end
@@ -512,6 +670,33 @@ function UI.Init(savedDB)
 
     ApplyPosition()
     UI.ApplyScale()
+
+    -- discreet cog in the title bar for the settings
+    local cog = CreateFrame("Button", nil, panel)
+    cog:SetSize(14, 14)
+    cog:SetPoint("TOPRIGHT", -28, -5)
+    cog.icon = cog:CreateTexture(nil, "ARTWORK")
+    cog.icon:SetAllPoints()
+    cog.icon:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
+    cog.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    cog.icon:SetDesaturated(true)
+    cog:SetAlpha(0.45)
+    cog:SetScript("OnEnter", function(self)
+        self:SetAlpha(1)
+        self.icon:SetDesaturated(false)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("Settings")
+        GameTooltip:Show()
+    end)
+    cog:SetScript("OnLeave", function(self)
+        self:SetAlpha(0.45)
+        self.icon:SetDesaturated(true)
+        GameTooltip:Hide()
+    end)
+    cog:SetScript("OnClick", function() UI.ToggleSettings() end)
+    UI.cog = cog
+
+    UI.ApplyOpacity()
     tabZone:Disable()
     if db.hidden then panel:Hide() else panel:Show() end
     UI.ApplyTracker()

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 - 2026-11-14
+
+- Settings panel: click the small cog in the title bar (or `/qsb settings`). It has an **Opacity** slider, a **Size** slider, and checkboxes for opening the zone you're in, showing objectives, hiding Blizzard's tracker, and locking the position.
+- Opacity fades the window background and zone bars only. Quest text and buttons stay solid. `/qsb opacity 70` works too.
+- Zone bars restyled after the world-map quest log: a dark brown bar with a thin bronze frame, the zone name in large off-white text, and a flat yellow - (open) or + (closed). In the All tab, the zone you're in reads gold.
+
 ## 1.1.0 - 2026-11-14
 
 - New look, based on the quest log in the world map: grey zone bars with gold names and -/+ buttons, quest icons, "[level] Title" coloured by difficulty, "- objective" lines, (Dungeon)/(Elite) tags, an open button and a track checkbox on every quest.
