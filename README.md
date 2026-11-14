@@ -2,11 +2,11 @@
 
 Your whole quest log down the side of the screen, where the quest tracker normally sits. It shows **every quest, tracked or not**, grouped by zone.
 
-- **The zone you're in opens by itself and jumps to the top.** Fly to the Barrens and the Barrens quests open. Fly on to Ashenvale and those open instead, while the Barrens closes.
+- **Two tabs.** **Current Zone** (the default) shows just the quests for where you are, with their objective text, and switches as you fly from the Barrens to Ashenvale. **All** lists every zone, A-Z, with the zone you're in opened for you.
+- It looks like the quest log in the world map: zone bars with -/+ buttons, "[level] Title" coloured by difficulty, "- objective" lines, (Dungeon)/(Elite) tags, an open button and a track checkbox.
 - **Click a zone** to open or close it. **Shift-click** pins it open everywhere you go.
-- Each quest shows its level (coloured by difficulty), its objectives with progress, and **Ready to turn in** when it's done. A `*` marks tracked quests.
-- **Click a quest** to open it in the quest log, **Shift-click** to link it in chat, and **right-click** to track or untrack it (for Questie arrows, for example).
-- Drag the panel to move it, scroll it with the mouse wheel, and use `-` to shrink it to its title bar.
+- **Click a quest** to show or hide its objectives, **Shift-click** to link it, and **right-click** or use the checkbox to track it. The ▶ button opens it in the quest log.
+- **Resize** with the grip in the bottom-right corner, **drag** to move, and scroll with the mouse wheel or the scroll bar. Size and position are remembered, and opening zones never makes the window grow or jump.
 
 By default it hides Blizzard's quest tracker so the two don't overlap (`/qsb tracker` to change that). Zone headers come from your quest log, so class, profession and dungeon quests get their own groups too.
 
@@ -20,7 +20,7 @@ By default it hides Blizzard's quest tracker so the two don't overlap (`/qsb tra
 | `/qsb objectives` | Objective lines on/off |
 | `/qsb lock` | Stop the panel being dragged |
 | `/qsb scale 0.8` | Make it smaller or bigger (0.5 to 2) |
-| `/qsb reset` | Move it back to the side and unpin all zones |
+| `/qsb reset` | Default size and position, unpin all zones |
 
 Settings and pinned zones are saved per character.
 

@@ -6,7 +6,7 @@
 
     Data side: reads the quest log into groups. The panel lives in QuestSidebar_UI.lua.
 
-    QuestSidebarDB = { settings = { autoZone, hideTracker, locked, scale }, pinned = { [zone]=true }, point = {...}, minimized }
+    QuestSidebarDB = { settings = { autoZone, hideTracker, locked, scale }, pinned = { [zone]=true }, point = {...}, size = {w, h}, hidden }
 ]]
 
 local ADDON = ...
@@ -92,6 +92,42 @@ function QSB.IsTracked(questID, index)
     return false
 end
 
+-- "Dungeon", "Elite", "Raid"... or nil
+function QSB.TagText(questID)
+    if not questID or questID == 0 then return nil end
+    if C_QuestLog and C_QuestLog.GetQuestTagInfo then
+        local info = C_QuestLog.GetQuestTagInfo(questID)
+        if info and info.tagName and info.tagName ~= "" and not IsSecret(info.tagName) then return info.tagName end
+    end
+    return nil
+end
+
+-- The quest's short objective text ("Scout the gazebo on Mystral Lake..."), cached
+-- because reading it means briefly selecting the quest in Blizzard's log.
+local detailCache = {}
+function QSB.Details(q)
+    if detailCache[q.questID] ~= nil then return detailCache[q.questID] or nil end
+    local text
+    if GetQuestLogQuestText then
+        if C_QuestLog and C_QuestLog.SetSelectedQuest then
+            local old = C_QuestLog.GetSelectedQuest and C_QuestLog.GetSelectedQuest()
+            C_QuestLog.SetSelectedQuest(q.questID)
+            local _, objectives = GetQuestLogQuestText()
+            text = objectives
+            if old and old ~= 0 then C_QuestLog.SetSelectedQuest(old) end
+        elseif SelectQuestLogEntry and GetQuestLogSelection then
+            local old = GetQuestLogSelection()
+            SelectQuestLogEntry(q.index)
+            local _, objectives = GetQuestLogQuestText()
+            text = objectives
+            if old and old > 0 then SelectQuestLogEntry(old) end
+        end
+    end
+    if text and (text == "" or IsSecret(text)) then text = nil end
+    detailCache[q.questID] = text or false
+    return text
+end
+
 -- { {zone, quests = { {title, level, questID, index, complete, objectives, tracked} }, total, done }, ... }
 function QSB.ReadLog()
     if ExpandBlizzardHeaders() then
@@ -114,6 +150,7 @@ function QSB.ReadLog()
                     title = e.title, level = e.level, questID = e.questID, index = i, complete = complete,
                     failed = e.isComplete == -1, group = e.suggestedGroup,
                     objectives = Objectives(e), tracked = QSB.IsTracked(e.questID, i),
+                    tag = QSB.TagText(e.questID),
                 }
                 if complete then group.done = group.done + 1 end
             end
@@ -186,12 +223,29 @@ function QSB.TogglePin(zone)
     QSB.Refresh()
 end
 
--- current zone first, then the order of the quest log
+-- A-Z by zone name (a leading "The " is ignored, so The Barrens sorts under B)
+local function SortKey(zone)
+    return (zone:gsub("^[Tt]he%s+", "")):lower()
+end
+QSB.SortKey = SortKey
+
 function QSB.Ordered(groups)
     local out = {}
-    for _, g in ipairs(groups) do if g.zone == currentZone then out[#out + 1] = g end end
-    for _, g in ipairs(groups) do if g.zone ~= currentZone then out[#out + 1] = g end end
+    for _, g in ipairs(groups) do out[#out + 1] = g end
+    table.sort(out, function(a, b) return SortKey(a.zone) < SortKey(b.zone) end)
     return out
+end
+
+-- the group for where we are standing, or nil
+function QSB.HereGroup(groups)
+    for _, g in ipairs(groups) do if g.zone == currentZone then return g end end
+end
+
+-- per-quest show/hide of objectives (click the quest)
+QSB.questFolded = {}
+function QSB.ToggleQuest(q)
+    QSB.questFolded[q.questID] = not QSB.questFolded[q.questID] or nil
+    QSB.Refresh()
 end
 
 local function OnZoneChanged()
@@ -287,10 +341,9 @@ local function Slash(msg)
         QSB.UI.ApplyScale()
         Print("Scale " .. s.scale)
     elseif cmd == "reset" then
-        db.point, db.height = nil, nil
         wipe(db.pinned)
         QSB.UI.ResetPosition()
-        Print("Moved back to the side and unpinned all zones.")
+        Print("Back to the default size and position, and all zones unpinned.")
         QSB.Refresh()
     else
         Print("/qsb - show/hide the sidebar")

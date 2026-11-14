@@ -28,13 +28,29 @@ function Widget:CreateFontString() return CreateFrame("FontString") end
 function Widget:CreateTexture() return CreateFrame("Texture") end
 function Widget:SetText(t) self.text = t end
 function Widget:GetText() return self.text or "" end
-function Widget:Show() self.shown = true; if self.scripts.OnShow then self.scripts.OnShow(self) end end
-function Widget:Hide() self.shown = false end
+function Widget:GetStringHeight() local n = 1; for _ in (self.text or ""):gmatch("\n") do n = n + 1 end; return n * 14 end
+function Widget:GetStringWidth() return #(self.text or "") * 5 end
+function Widget:Show() local was = self.shown; self.shown = true; if not was and self.scripts.OnShow then self.scripts.OnShow(self) end end
+function Widget:Hide() local was = self.shown; self.shown = false; if was and self.scripts.OnHide then self.scripts.OnHide(self) end end
 function Widget:IsShown() return self.shown end
-function Widget:SetHeight(h) self.height = h end
-function Widget:GetPoint() return "TOPRIGHT", nil, "TOPRIGHT", -40, -250 end
-function CreateFrame(kind, name)
-  local f = setmetatable({ scripts = {}, events = {}, kind = kind }, Widget)
+function Widget:SetSize(w, h) self.w, self.h = w, h end
+function Widget:SetHeight(h) self.h = h end
+function Widget:SetWidth(w) self.w = w end
+function Widget:GetHeight() return self.h or 300 end
+function Widget:GetWidth() return self.w or 300 end
+function Widget:GetLeft() return 1500 end
+function Widget:GetTop() return 900 end
+function Widget:SetChecked(v) self.checked = v end
+function Widget:GetChecked() return self.checked end
+function Widget:SetVerticalScroll(v) self.vscroll = v end
+function Widget:SetMinMaxValues(a, b) self.min, self.max = a, b end
+function Widget:SetValue(v) self.value = v end
+function Widget:SetTexture(t) self.texture = t end
+function Widget:Disable() self.disabled = true end
+function Widget:Enable() self.disabled = false end
+function Widget:GetParent() return self.parent end
+function CreateFrame(kind, name, parent)
+  local f = setmetatable({ scripts = {}, events = {}, kind = kind, parent = parent }, Widget)
   if name then _G[name] = f end
   return f
 end
@@ -46,16 +62,19 @@ function IsShiftKeyDown() return SHIFT end
 function IsModifiedClick() return SHIFT end
 function GetQuestDifficultyColor(l) return { r = 1, g = l > 20 and 0.1 or 1, b = 0.1 } end
 
--- the quest log: { header or quest }
 LOG = {
-  { title = "Ashenvale", isHeader = true },
-  { title = "Bathran's Hair", level = 22, questID = 1, isComplete = false, obj = { { text = "Bathran's Hair: 2/5", finished = false } } },
   { title = "The Barrens", isHeader = true },
   { title = "Plainstrider Menace", level = 12, questID = 2, isComplete = true, obj = { { text = "Plainstrider Beak: 7/7", finished = true } } },
   { title = "Raptor Thieves", level = 15, questID = 3, isComplete = false, obj = { { text = "Raptor Head: 3/12", finished = false } } },
-  { title = "Warrior", isHeader = true, isCollapsed = true },
-  { title = "Hidden while collapsed", level = 20, questID = 4, isComplete = false, obj = {} },
+  { title = "Ashenvale", isHeader = true },
+  { title = "Stonetalon Standstill", level = 25, questID = 1, isComplete = false, obj = { { text = "0/12 Befouled Water Elemental slain", finished = false } } },
+  { title = "Crafting", isHeader = true },
+  { title = "Craftsman's Writ", level = 60, questID = 7, isComplete = false, obj = {} },
+  { title = "Blackfathom Deeps", isHeader = true, isCollapsed = true },
+  { title = "The Essence of Aku'Mai", level = 22, questID = 4, isComplete = false, obj = { { text = "11/20 Sapphire of Aku'Mai", finished = false } } },
 }
+TAGS = { [4] = "Dungeon" }
+DETAILS = { [3] = "Bring 12 Raptor Heads to Regthar Deathgate.", [1] = "Scout the gazebo on Mystral Lake." }
 local function visible()
   local v, skip = {}, false
   for _, e in ipairs(LOG) do
@@ -65,6 +84,7 @@ local function visible()
   return v
 end
 WATCHED = { [3] = true }
+SELECTED = 99
 C_QuestLog = {
   GetNumQuestLogEntries = function() return #visible() end,
   GetInfo = function(i) local e = visible()[i]; if not e then return nil end
@@ -74,8 +94,12 @@ C_QuestLog = {
   AddQuestWatch = function(id) WATCHED[id] = true end,
   RemoveQuestWatch = function(id) WATCHED[id] = nil end,
   GetQuestLink = function(id) return "[quest " .. id .. "]" end,
+  GetQuestTagInfo = function(id) return TAGS[id] and { tagName = TAGS[id] } or nil end,
+  GetSelectedQuest = function() return SELECTED end,
+  SetSelectedQuest = function(id) SELECTED = id end,
 }
-function ExpandQuestHeader(i) local e = visible()[i]; if e and e.isHeader then e.isCollapsed = false; calls[#calls+1] = "expand " .. e.title end end
+function GetQuestLogQuestText() calls[#calls+1] = "read " .. SELECTED; return "desc", DETAILS[SELECTED] or "" end
+function ExpandQuestHeader(i) local e = visible()[i]; if e and e.isHeader then e.isCollapsed = false end end
 ZONE = "The Barrens"
 function GetRealZoneText() return ZONE end
 function GetZoneText() return ZONE end
@@ -99,109 +123,123 @@ for f in ("QuestSidebar.lua", "QuestSidebar_UI.lua"):
     lua.execute("local f = assert(loadstring(...)); f('QuestSidebar')", open(os.path.join(ROOT, f), encoding="utf-8").read())
 ev = lua.eval("function(e, ...) QuestSidebar.frame:GetScript('OnEvent')(QuestSidebar.frame, e, ...) end")
 run = lua.execute
+calls = lambda: list(lua.eval("calls").values())
 
-def shown():
-    out = []
-    for l in lua.eval("QuestSidebar.UI.Lines()").values():
-        if l.shown:
-            out.append((l.kind, l.text.text))
-    return out
-def texts(): return [t for _, t in shown()]
-def headers(): return [t for k, t in shown() if k == "header"]
+def hdrs(): return [h.zone for h in lua.eval("QuestSidebar.UI.Headers()").values() if h.shown]
+def qrows(): return [q for q in lua.eval("QuestSidebar.UI.Quests()").values() if q.shown]
+def qtitles(): return [q.title.text for q in qrows()]
+def has(name): return any(name in t for t in qtitles())
+def row(name):
+    for q in qrows():
+        if name in q.title.text: return q
+def header(name):
+    for h in lua.eval("QuestSidebar.UI.Headers()").values():
+        if h.shown and h.zone == name: return h
 
-ev("PLAYER_LOGIN")
-check("panel shown", lua.eval("QuestSidebarFrame:IsShown()"))
-check("blizzard tracker hidden", not lua.eval("ObjectiveTrackerFrame:IsShown()"))
-ev("PLAYER_ENTERING_WORLD")
-check("collapsed blizzard header expanded", "expand Warrior" in list(lua.eval("calls").values()))
-check("quest under collapsed header read", any(g.zone == "Warrior" and len(g.quests) == 1 for g in lua.eval("QuestSidebar.ReadLog()").values()))
-check("current zone first", "The Barrens" in headers()[0] and "here" in headers()[0])
-check("all zones listed", len(headers()) == 3)
-check("barrens open", any("Raptor Thieves" in t for t in texts()))
-check("objectives shown", any("Raptor Head: 3/12" in t for t in texts()))
-check("ashenvale closed", not any("Bathran" in t for t in texts()))
-check("complete quest marked", any("Plainstrider" in t and "Ready to turn in" in t for t in texts()))
-check("finished quest's objectives hidden", not any("Plainstrider Beak" in t for t in texts()))
-check("tracked marker", any("Raptor Thieves" in t and "* " in t for t in texts()))
-check("untracked quest still shown", any("Plainstrider Menace" in t for t in texts()))
+ev("PLAYER_LOGIN"); ev("PLAYER_ENTERING_WORLD")
+P = "QuestSidebarFrame"
+check("panel shown", lua.eval(P + ":IsShown()"))
+check("tracker hidden", not lua.eval("ObjectiveTrackerFrame:IsShown()"))
+check("Current Zone tab by default", lua.eval("QuestSidebar.UI.tab") == "zone")
 
-# fly to Ashenvale
+# --- Current Zone tab ---------------------------------------------------------
+check("only the current zone", hdrs() == ["The Barrens"])
+check("its quests", has("Raptor Thieves") and has("Plainstrider Menace") and not has("Stonetalon"))
+r = row("Raptor Thieves")
+check("level + title", "[15] Raptor Thieves" in r.title.text)
+check("objective with dash", r.objectives.text == "- Raptor Head: 3/12")
+check("quest details shown", r.details.text == DETAILS3 if (DETAILS3 := "Bring 12 Raptor Heads to Regthar Deathgate.") else False)
+check("selection restored after reading details", lua.eval("SELECTED") == 99)
+check("tracked checkbox", r.track.checked is True and row("Plainstrider").track.checked is False)
+p = row("Plainstrider")
+check("complete: ready to turn in", "Ready to turn in" in p.objectives.text and "Beak" not in p.objectives.text)
+check("complete icon", p.icon.texture.endswith("ActiveQuestIcon") and r.icon.texture.endswith("IncompleteQuestIcon"))
+
+# details are cached (log selection isn't poked every redraw)
+n_reads = sum(1 for c in calls() if c.startswith("read"))
+run("QuestSidebar.Refresh()")
+check("details cached", sum(1 for c in calls() if c.startswith("read")) == n_reads)
+
+# fly to Ashenvale: current zone tab follows
 run("ZONE = 'Ashenvale'"); ev("ZONE_CHANGED_NEW_AREA")
-check("ashenvale now first + open", "Ashenvale" in headers()[0] and any("Bathran" in t for t in texts()))
-check("barrens closed after leaving", not any("Raptor Thieves" in t for t in texts()))
-
-# open Barrens by hand, then move: it closes again
-lines = lua.eval("QuestSidebar.UI.Lines()")
-def click_header(name, button="LeftButton"):
-    for l in lua.eval("QuestSidebar.UI.Lines()").values():
-        if l.shown and l.kind == "header" and l.zone == name:
-            l.scripts["OnClick"](l, button); return True
-    return False
-click_header("The Barrens")
-check("manual open", any("Raptor Thieves" in t for t in texts()))
+check("current zone follows the player", hdrs() == ["Ashenvale"] and has("Stonetalon") and not has("Raptor"))
+check("ashenvale details", row("Stonetalon").details.text == "Scout the gazebo on Mystral Lake.")
 run("ZONE = 'Orgrimmar'"); ev("ZONE_CHANGED_NEW_AREA")
-check("manual open closes on zone change", not any("Raptor Thieves" in t for t in texts()))
-check("no quests here: log order", "Ashenvale" in headers()[0])
+check("no quests here message", hdrs() == [] and lua.eval("QuestSidebar.UI.Empty():IsShown()") and "Orgrimmar" in lua.eval("QuestSidebar.UI.Empty().text"))
 
-# pin Barrens (shift-click): stays open everywhere
-run("SHIFT = true"); click_header("The Barrens"); run("SHIFT = false")
-check("pinned label", any("The Barrens" in h and "pinned" in h for h in headers()))
+# --- All tab -----------------------------------------------------------------
+run("QuestSidebar.UI.SelectTab('all')")
+check("A-Z (The ignored)", hdrs() == ["Ashenvale", "The Barrens", "Blackfathom Deeps", "Crafting"])
+check("collapsed Blizzard header read", lua.eval("QuestSidebar.ReadLog()[4].zone") == "Blackfathom Deeps")
+check("zones closed away from them", qrows() == [])
+run("ZONE = 'The Barrens'"); ev("ZONE_CHANGED_NEW_AREA")
+check("current zone auto-opens in All", has("Raptor Thieves") and not has("Stonetalon"))
+check("all tab: no details text", row("Raptor Thieves").details.text == "")
+check("open/close icons", header("The Barrens").toggle.texture.endswith("MinusButton-Up") and header("Ashenvale").toggle.texture.endswith("PlusButton-Up"))
+header("Blackfathom Deeps").scripts["OnClick"](header("Blackfathom Deeps"))
+q = row("Essence")
+check("dungeon tag", q is not None and "(Dungeon)" in q.tag.text)
+run("SHIFT = true"); header("Crafting").scripts["OnClick"](header("Crafting")); run("SHIFT = false")
 run("ZONE = 'Ashenvale'"); ev("ZONE_CHANGED_NEW_AREA")
-check("pinned stays open + current open", any("Raptor Thieves" in t for t in texts()) and any("Bathran" in t for t in texts()))
-check("pin saved", lua.eval("QuestSidebarDB.pinned['The Barrens']") is True)
+check("pinned stays, hand-opened closes", has("Craftsman") and not has("Essence") and has("Stonetalon"))
 
-# close the current zone by hand
-click_header("Ashenvale")
-check("current zone can be closed", not any("Bathran" in t for t in texts()))
-click_header("Ashenvale")
-check("and reopened", any("Bathran" in t for t in texts()))
+# window keeps its size whatever opens
+h_before = lua.eval(P + ".h")
+for z in ["The Barrens", "Blackfathom Deeps"]:
+    header(z).scripts["OnClick"](header(z))
+check("window height unchanged by expanding", lua.eval(P + ".h") == h_before)
+check("scrolls when content is taller", lua.eval("QuestSidebar.UI.maxScroll") > 0)
+run("QuestSidebar.UI.Scroll(-100)")
+check("scroll clamps at bottom", lua.eval("QuestSidebar.UI.bar.value") == lua.eval("QuestSidebar.UI.maxScroll"))
+run("QuestSidebar.UI.Scroll(100)")
+check("scroll clamps at top", lua.eval("QuestSidebar.UI.bar.value") == 0)
 
-# quest actions
-def click_quest(name, button="LeftButton"):
-    for l in lua.eval("QuestSidebar.UI.Lines()").values():
-        if l.shown and l.kind == "quest" and name in l.text.text:
-            l.scripts["OnClick"](l, button); return True
-click_quest("Bathran")
-check("click opens quest", "open 1" in list(lua.eval("calls").values()))
-run("SHIFT = true"); click_quest("Bathran"); run("SHIFT = false")
-check("shift-click links", "link [quest 1]" in list(lua.eval("calls").values()))
-click_quest("Bathran", "RightButton"); run("run_timers()")
-check("right-click tracks", lua.eval("WATCHED[1]") is True and any("Bathran" in t and "* " in t for t in texts()))
+# resize: saved, survives reload
+run(P + ".scripts.OnSizeChanged(" + P + ", 360, 600); run_timers()")
+check("size saved", lua.eval("QuestSidebarDB.size[1]") == 360 and lua.eval("QuestSidebarDB.size[2]") == 600)
+check("rows follow the new width", row("Stonetalon").w == 360 - 34)
 
-# quest log changes redraw (debounced)
-run("table.insert(LOG, 2, { title = 'Elemental Bracers', level = 24, questID = 9, isComplete = false, obj = { { text = 'Intact Elemental Bracer: 0/5', finished = false } } })")
-ev("QUEST_LOG_UPDATE"); ev("QUEST_LOG_UPDATE")
-check("refresh debounced", lua.eval("#timers") == 1)
-run("run_timers()")
-check("new quest appears", any("Elemental Bracers" in t for t in texts()))
+# quest interactions
+r = row("Stonetalon")
+r.scripts["OnClick"](r, "LeftButton")
+check("click folds objectives", row("Stonetalon").objectives.text == "")
+row("Stonetalon").scripts["OnClick"](row("Stonetalon"), "LeftButton")
+check("click unfolds", "Befouled" in row("Stonetalon").objectives.text)
+r = row("Stonetalon")
+r.open.scripts["OnClick"](r.open)
+check("open button", "open 1" in calls())
+r.track.scripts["OnClick"](r.track); run("run_timers()")
+check("checkbox tracks", lua.eval("WATCHED[1]") is True and row("Stonetalon").track.checked is True)
+run("SHIFT = true"); row("Stonetalon").scripts["OnClick"](row("Stonetalon"), "LeftButton"); run("SHIFT = false")
+check("shift-click links", "link [quest 1]" in calls())
 
-# settings
+# close / Alt+Z / reopen
+run(P + ":Hide()")
+check("closing brings the tracker back", lua.eval("ObjectiveTrackerFrame:IsShown()") and lua.eval("QuestSidebarDB.hidden") is True)
+run(P + ":Show()")
+check("reopens on Current Zone", lua.eval("QuestSidebar.UI.tab") == "zone" and not lua.eval("ObjectiveTrackerFrame:IsShown()"))
+run("local f = " + P + "; f.shown = false; f.IsShown = function() return true end; f.scripts.OnHide(f); f.IsShown = nil; f.shown = true")
+check("Alt+Z doesn't count as closing", lua.eval("QuestSidebarDB.hidden") is None)
+
+# reload keeps size + position
+saved = lua.eval("QuestSidebarDB")
+lua2 = L.LuaRuntime(unpack_returned_tuples=True); lua2.execute(MOCK)
+lua2.execute("QuestSidebarDB = { settings = { autoZone = true, hideTracker = true, showObjectives = true, scale = 1 }, pinned = {}, size = { 360, 600 }, point = { 'TOPLEFT', 'BOTTOMLEFT', 1500, 900 } }")
+for f in ("QuestSidebar.lua", "QuestSidebar_UI.lua"):
+    lua2.execute("local f = assert(loadstring(...)); f('QuestSidebar')", open(os.path.join(ROOT, f), encoding="utf-8").read())
+lua2.eval("function() QuestSidebar.frame:GetScript('OnEvent')(QuestSidebar.frame, 'PLAYER_LOGIN') end")()
+check("size restored", lua2.eval("QuestSidebarFrame.w") == 360 and lua2.eval("QuestSidebarFrame.h") == 600)
+
+# slash
+run("SlashCmdList.QUESTSIDEBAR('objectives'); QuestSidebar.UI.SelectTab('zone'); ZONE = 'The Barrens'"); ev("ZONE_CHANGED_NEW_AREA")
+check("objectives off", row("Raptor").objectives.text == "")
 run("SlashCmdList.QUESTSIDEBAR('objectives')")
-check("objectives off", not any("Intact Elemental" in t for t in texts()))
-run("SlashCmdList.QUESTSIDEBAR('objectives')")
-run("SlashCmdList.QUESTSIDEBAR('auto')")
-run("ZONE = 'The Barrens'; QuestSidebarDB.pinned = {}"); ev("ZONE_CHANGED_NEW_AREA")
-check("auto off: zone not opened", not any("Raptor Thieves" in t for t in texts()))
-run("SlashCmdList.QUESTSIDEBAR('auto')")
-run("SlashCmdList.QUESTSIDEBAR('tracker')")
-check("tracker restored", lua.eval("ObjectiveTrackerFrame:IsShown()"))
-run("SlashCmdList.QUESTSIDEBAR('tracker')")
-check("tracker hidden again", not lua.eval("ObjectiveTrackerFrame:IsShown()"))
-
-# minimise + hide
-run("QuestSidebarFrame.scripts = QuestSidebarFrame.scripts")
-run("QuestSidebarDB.minimized = true; QuestSidebar.Refresh()")
-check("minimised hides lines", len(shown()) == 0)
-run("QuestSidebarDB.minimized = nil; QuestSidebar.Refresh()")
-run("SlashCmdList.QUESTSIDEBAR('')")
-check("slash hides panel", not lua.eval("QuestSidebarFrame:IsShown()") and lua.eval("ObjectiveTrackerFrame:IsShown()"))
-run("SlashCmdList.QUESTSIDEBAR('')")
-check("slash shows panel", lua.eval("QuestSidebarFrame:IsShown()") and not lua.eval("ObjectiveTrackerFrame:IsShown()"))
-
-# empty log
-run("LOG = {}; QuestSidebar.Refresh()")
-check("empty log message", any("empty" in t for t in texts()))
+run("SlashCmdList.QUESTSIDEBAR('reset')")
+check("reset size", lua.eval(P + ".w") == 300 and lua.eval("QuestSidebarDB.size") is None)
 run("SlashCmdList.QUESTSIDEBAR('help')")
+
+run("LOG = {}; QuestSidebar.UI.SelectTab('all')")
+check("empty log", "empty" in lua.eval("QuestSidebar.UI.Empty().text"))
 
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
