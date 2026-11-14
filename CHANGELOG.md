@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0 - 2026-11-14
+
+- Finished quests stand out much more in the **Current Zone** tab:
+  - They have their own **Ready to turn in** section at the top, with a count. The rest follow under **In progress**.
+  - Each one has a gold edge down the left, a stronger gold highlight, and a green tick next to "Ready to turn in".
+  - When the game provides it, the quest says who to hand it in to (for example "Return to Regthar Deathgate..."). If it doesn't, you see the usual quest summary.
+- The finished count on zone headers is green.
+
 ## 1.5.0 - 2026-11-14
 
 - **Party markers.** In a party, each quest shows how many party members have it, for example `1/2`. Hover over the quest to see who has it and who doesn't.

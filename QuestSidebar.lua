@@ -129,6 +129,29 @@ function QSB.Details(q)
     return text
 end
 
+-- Who to hand a finished quest to ("Return to Regthar Deathgate..."), when the
+-- client offers it; otherwise nil and the objective summary is shown instead.
+local turnInCache = {}
+function QSB.TurnIn(q)
+    if not q.complete or not GetQuestLogCompletionText then return nil end
+    if turnInCache[q.questID] ~= nil then return turnInCache[q.questID] or nil end
+    local ok, text
+    if C_QuestLog and C_QuestLog.SetSelectedQuest then
+        local old = C_QuestLog.GetSelectedQuest and C_QuestLog.GetSelectedQuest()
+        C_QuestLog.SetSelectedQuest(q.questID)
+        ok, text = pcall(GetQuestLogCompletionText, q.index)
+        if old and old ~= 0 then C_QuestLog.SetSelectedQuest(old) end
+    elseif SelectQuestLogEntry and GetQuestLogSelection then
+        local old = GetQuestLogSelection()
+        SelectQuestLogEntry(q.index)
+        ok, text = pcall(GetQuestLogCompletionText, q.index)
+        if old and old > 0 then SelectQuestLogEntry(old) end
+    end
+    if not ok or type(text) ~= "string" or text == "" or IsSecret(text) then text = nil end
+    turnInCache[q.questID] = text or false
+    return text
+end
+
 -- { {zone, quests = { {title, level, questID, index, complete, objectives, tracked} }, total, done }, ... }
 function QSB.ReadLog()
     if ExpandBlizzardHeaders() then

@@ -18,6 +18,8 @@ local SHARE_H = 22
 local SEARCH_H = 20
 local PARTY = "|cff66ddff"
 local ORANGE = "|cffff9933"
+local CHECK = "|TInterface\\RaidFrame\\ReadyCheck-Ready:13:13|t"
+local SECTION_H = 18
 local PAD = 6
 
 local GREY = "|cff9a9a9a"
@@ -31,7 +33,7 @@ local ICON_OPEN = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up"
 
 local db
 local panel, scroll, content, tabZone, tabAll, empty
-local headers, quests = {}, {}
+local headers, quests, sections = {}, {}, {}
 local scrollY = 0
 UI.tab = "zone"
 
@@ -186,6 +188,13 @@ local function NewQuest()
     r.ready:SetAllPoints()
     r.ready:SetColorTexture(1, 0.82, 0, 0.08)
     r.ready:Hide()
+    -- gold edge down the left of a finished quest
+    r.readyEdge = r:CreateTexture(nil, "BORDER")
+    r.readyEdge:SetPoint("TOPLEFT", 0, 0)
+    r.readyEdge:SetPoint("BOTTOMLEFT", 0, 0)
+    r.readyEdge:SetWidth(3)
+    r.readyEdge:SetColorTexture(1, 0.82, 0, 0.9)
+    r.readyEdge:Hide()
 
     r.icon = r:CreateTexture(nil, "ARTWORK")
     r.icon:SetSize(20, 20)
@@ -278,7 +287,15 @@ local function FillQuest(r, q, width, showDetails)
     r.title:SetWidth(width - 30 - 46 - tagW)
     r.title:SetText(LevelColor(q.level) .. "[" .. (q.level or "?") .. "] " .. q.title .. "|r")
     r.track:SetChecked(q.tracked)
-    if q.complete then r.ready:Show() else r.ready:Hide() end
+    -- finished: stronger wash + gold edge in Current Zone, a lighter wash in All
+    if q.complete then
+        r.ready:SetColorTexture(1, 0.82, 0, showDetails and 0.16 or 0.08)
+        r.ready:Show()
+        if showDetails then r.readyEdge:Show() else r.readyEdge:Hide() end
+    else
+        r.ready:Hide()
+        r.readyEdge:Hide()
+    end
 
     local h = math.max(22, (r.title:GetStringHeight() or 14) + 6)
 
@@ -287,7 +304,7 @@ local function FillQuest(r, q, width, showDetails)
     if not folded then
         local parts = {}
         if q.complete then
-            parts[#parts + 1] = GREEN .. "- Ready to turn in|r"
+            parts[#parts + 1] = GREEN .. CHECK .. " Ready to turn in|r"
         elseif q.failed then
             parts[#parts + 1] = RED .. "- Failed|r"
         elseif db.settings.showObjectives then
@@ -309,7 +326,8 @@ local function FillQuest(r, q, width, showDetails)
         r.objectives:Hide()
     end
 
-    local details = showDetails and not folded and QSB.Details(q)
+    -- for a finished quest, say who to hand it to when the game tells us
+    local details = showDetails and not folded and ((q.complete and QSB.TurnIn(q)) or QSB.Details(q))
     r.details:ClearAllPoints()
     r.details:SetPoint("TOPLEFT", 30, -h - 2)
     r.details:SetWidth(width - 36)
@@ -364,7 +382,7 @@ function UI.Draw(groups)
         -- in All, the zone you're in reads gold; pinned zones say so
         local name = (g.zone == here and UI.tab == "all") and ("|cffffd100" .. g.zone .. "|r") or g.zone
         h.text:SetText(name .. (db.pinned[g.zone] and "|cff66ddff  (pinned)|r" or ""))
-        h.count:SetText((g.done > 0 and (g.done .. "/") or "") .. #g.quests)
+        h.count:SetText((g.done > 0 and (GREEN .. g.done .. "|r/") or "") .. #g.quests)
         h.open = open
         if open then h.plus:Hide() else h.plus:Show() end
         h.bar:SetAlpha(math.max(0.35, db.settings.opacity or 1))
@@ -380,6 +398,31 @@ function UI.Draw(groups)
         r:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
         y = y + FillQuest(r, q, width, details)
         r:Show()
+    end
+
+    -- small section labels inside the Current Zone list
+    local ns = 0
+    local function Section(text, gold)
+        ns = ns + 1
+        local l = sections[ns]
+        if not l then
+            l = CreateFrame("Frame", nil, content)
+            l:SetHeight(SECTION_H)
+            l.text = l:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+            l.text:SetPoint("LEFT", 4, 0)
+            l.line = l:CreateTexture(nil, "ARTWORK")
+            l.line:SetHeight(1)
+            l.line:SetPoint("LEFT", l.text, "RIGHT", 6, 0)
+            l.line:SetPoint("RIGHT", -2, 0)
+            sections[ns] = l
+        end
+        l:ClearAllPoints()
+        l:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y - 2)
+        l:SetWidth(width)
+        l.text:SetText(text)
+        if gold then l.line:SetColorTexture(1, 0.82, 0, 0.5) else l.line:SetColorTexture(0.6, 0.55, 0.45, 0.35) end
+        l:Show()
+        y = y + SECTION_H + 4
     end
 
     empty:Hide()
@@ -406,7 +449,17 @@ function UI.Draw(groups)
                 y = y + SHARE_H + 4
             end
             local shown = Visible(g.quests)
-            for _, q in ipairs(shown) do Quest(q, true) end
+            -- finished quests get their own section at the top
+            local ready, rest = {}, {}
+            for _, q in ipairs(shown) do
+                if q.complete then ready[#ready + 1] = q else rest[#rest + 1] = q end
+            end
+            if #ready > 0 then
+                Section(CHECK .. " |cffffd100Ready to turn in|r  " .. GREEN .. #ready .. "|r", true)
+                for _, q in ipairs(ready) do Quest(q, true) end
+                if #rest > 0 then Section("|cffd8d0bcIn progress|r  " .. GREY .. #rest .. "|r", false) end
+            end
+            for _, q in ipairs(rest) do Quest(q, true) end
             if #shown < #g.quests then
                 empty:ClearAllPoints()
                 empty:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -y - 4)
@@ -468,6 +521,7 @@ function UI.Draw(groups)
     end
     for i = nh + 1, #headers do headers[i]:Hide() end
     for i = nq + 1, #quests do quests[i]:Hide() end
+    for i = ns + 1, #sections do sections[i]:Hide() end
 
     content:SetWidth(width)
     content:SetHeight(math.max(1, y))
@@ -502,6 +556,7 @@ end
 -- tests
 function UI.Headers() return headers end
 function UI.Quests() return quests end
+function UI.Sections() return sections end
 function UI.Empty() return empty end
 
 ---------------------------------------------------------------------------

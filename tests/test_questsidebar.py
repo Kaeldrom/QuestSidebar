@@ -509,5 +509,35 @@ lua.execute("C_QuestLog.GetMaxNumQuestsCanAccept = function() return 4 end; Ques
 check("log full flagged", lua.eval("QuestSidebar.UI.logFull") is True)
 lua.execute("C_QuestLog.GetMaxNumQuestsCanAccept = nil; QuestSidebar.Refresh()")
 
+# ---- 1.6.0: finished quests stand out in Current Zone --------------------------------------
+reset_log()
+lua.execute("""TURNIN = { [2] = "Return to Regthar Deathgate at the Center Plains." }
+function GetQuestLogCompletionText() return TURNIN[SELECTED] or "" end
+GROUP = false; PARTY = {}; SELECTED = 99; ZONE = 'The Barrens'; QuestSidebar.UI.SelectTab('zone')""")
+ev("ZONE_CHANGED_NEW_AREA"); lua.execute("run_timers()")
+def sections(): return [l.text.text for l in lua.eval("QuestSidebar.UI.Sections()").values() if l.shown]
+sec = sections()
+check("ready section first", len(sec) == 2 and "Ready to turn in" in sec[0] and "1" in sec[0] and "In progress" in sec[1] and "2" in sec[1])
+order = qtitles()
+check("ready quest above the section split", "Plainstrider" in order[0] and all("Plainstrider" not in t for t in order[1:]))
+p = row("Plainstrider")
+check("gold edge in Current Zone", p.readyEdge.shown and not row("Raptor").readyEdge.shown)
+check("tick on ready line", "ReadyCheck-Ready" in p.objectives.text and "Ready to turn in" in p.objectives.text)
+check("turn-in NPC shown", p.details.text == "Return to Regthar Deathgate at the Center Plains.")
+check("selection restored after turn-in read", lua.eval("SELECTED") == 99)
+check("in-progress quests keep their summary", row("Raptor").details.text == "Bring 12 Raptor Heads to Regthar Deathgate.")
+check("header done count green", "|cff40c040" in header("The Barrens").count.text)
+
+lua.execute("QuestSidebar.UI.SelectTab('all')")
+check("no sections in All", sections() == [])
+check("All: lighter wash, no edge", row("Plainstrider").ready.shown and not row("Plainstrider").readyEdge.shown)
+
+lua.execute("""for _, e in ipairs(LOG) do if e.questID == 2 then e.isComplete = false end end
+QuestSidebar.UI.SelectTab('zone')""")
+check("no sections when nothing is finished", sections() == [])
+
+lua.execute("TURNIN = {}; for _, e in ipairs(LOG) do if e.questID == 5 then e.isComplete = true end end; QuestSidebar.Refresh()")
+check("no turn-in text: falls back to summary", row("Kolkar").details.text in ("", None) or row("Kolkar").details.shown is False)
+
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
