@@ -128,6 +128,28 @@ PUSHES = {}
 function QuestLogPushQuest() PUSHES[#PUSHES+1] = SELECTED end
 C_QuestLog.IsPushableQuest = function(id) return PUSHABLE[id] ~= false end
 ERR_QUEST_PUSH_BUSY_S = "%s is busy."
+PARTY = {}            -- { {name=, quests={[id]=true}} }
+function GetNumSubgroupMembers() return #PARTY end
+function UnitExists(u) local i = tonumber(u:match("party(%d)")); return i and PARTY[i] ~= nil end
+function UnitName(u) local i = tonumber(u:match("party(%d)")); return i and PARTY[i] and PARTY[i].name end
+C_QuestLog.IsUnitOnQuest = function(u, id) local i = tonumber(u:match("party(%d)")); return PARTY[i].quests[id] == true end
+MYLEVEL = 20
+function UnitLevel() return MYLEVEL end
+MENU = nil
+MenuUtil = { CreateContextMenu = function(owner, gen)
+  MENU = { items = {} }
+  local root = { CreateTitle = function(_, t) MENU.title = t end,
+                 CreateButton = function(_, t, f) local b = { text = t, func = f, enabled = true }
+                   function b:SetEnabled(v) self.enabled = v end
+                   table.insert(MENU.items, b); return b end }
+  gen(owner, root)
+end }
+StaticPopupDialogs = {}
+POPUP = nil
+function StaticPopup_Show(which, a, b, data) POPUP = { which = which, text = a, data = data }; return POPUP end
+ABANDONED = {}
+C_QuestLog.SetAbandonQuest = function() ABANDON_SEL = SELECTED end
+C_QuestLog.AbandonQuest = function() ABANDONED[#ABANDONED+1] = ABANDON_SEL end
 '''
 
 passed = failed = 0
@@ -380,6 +402,112 @@ lua.execute("PUSHES = {}; QuestSidebar.ShareZone(); GROUP = false; run_timers()"
 check("leaving the group stops sharing", pushes() == [2] and "no longer in a group" in last_print())
 lua.execute("run_timers(); QuestSidebar.UI.SelectTab('all')")
 check("no share button in All", not lua.eval(SB + ".shown"))
+
+# ---- 1.5.0: party markers ------------------------------------------------------------
+def reset_log():
+    lua.execute("""LOG = {
+  { title = "The Barrens", isHeader = true },
+  { title = "Raptor Thieves", level = 15, questID = 3, isComplete = false, obj = { { text = "Raptor Head: 3/12", finished = false } } },
+  { title = "Plainstrider Menace", level = 12, questID = 2, isComplete = true, obj = {} },
+  { title = "Kolkar Leaders", level = 11, questID = 5, isComplete = false, obj = {} },
+  { title = "Ashenvale", isHeader = true },
+  { title = "Stonetalon Standstill", level = 25, questID = 1, isComplete = false, obj = { { text = "0/12 Befouled Water Elemental slain", finished = false } } },
+}""")
+reset_log()
+lua.execute("PUSHES = {}; GROUP = true; PARTY = { { name = 'Brother', quests = { [3] = true } }, { name = 'Cousin', quests = { [3] = true, [2] = true } } }")
+lua.execute("ZONE = 'The Barrens'; QuestSidebar.UI.SelectTab('zone')"); ev("ZONE_CHANGED_NEW_AREA"); lua.execute("run_timers()")
+check("party marker: everyone has it", row("Raptor Thieves").tag.text.endswith("2/2|r"))
+check("party marker: some have it", "1/2" in row("Plainstrider").tag.text)
+check("party marker: nobody", "0/2" in row("Kolkar").tag.text)
+lua.execute("local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Plainstrider') then r = q end end; r.scripts.OnEnter(r)")
+po = lua.eval("QuestSidebar.PartyOn({ questID = 2, index = 3 })")
+check("PartyOn names", list(po.have.values()) == ["Cousin"] and list(po.missing.values()) == ["Brother"])
+
+# ---- ready to turn in first -----------------------------------------------------------
+check("ready-to-turn-in quests on top", qtitles()[0].find("Plainstrider") >= 0)
+check("ready highlight", row("Plainstrider").ready.shown and not row("Raptor").ready.shown)
+
+# ---- share all skips quests the whole party has --------------------------------------------
+lua.execute("QuestSidebar.ShareZone()")
+check("share skips what everyone has", "1 the whole party already has" in last_print())
+lua.execute("run_timers(); run_timers(); run_timers()")
+check("only missing quests pushed", sorted(pushes()) == [2, 5])
+
+# ---- right-click menu -------------------------------------------------------------------------
+lua.execute("PUSHES = {}; local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Kolkar') then r = q end end; r.scripts.OnClick(r, 'RightButton')")
+items = [ (i.text, i.enabled) for i in lua.eval("MENU.items").values() ]
+check("menu title", lua.eval("MENU.title") == "Kolkar Leaders")
+check("menu items", [t for t, _ in items][:4] == ["Track", "Share with party", "Link in chat", "Show in quest log"] and "Abandon" in items[4][0])
+check("right-click no longer just tracks", lua.eval("WATCHED[5]") is None)
+lua.execute("MENU.items[1].func()"); lua.execute("run_timers()")
+check("menu: track", lua.eval("WATCHED[5]") is True)
+lua.execute("MENU.items[2].func()"); lua.execute("run_timers()")
+check("menu: share one quest", pushes() == [5] and "Shared Kolkar Leaders with your party" in last_print())
+lua.execute("MENU.items[5].func()")
+check("abandon asks first", lua.eval("POPUP.which") == "QUESTSIDEBAR_ABANDON" and lua.eval("POPUP.text") == "Kolkar Leaders" and lua.eval("#ABANDONED") == 0)
+lua.execute("StaticPopupDialogs.QUESTSIDEBAR_ABANDON.OnAccept(POPUP, POPUP.data)")
+check("abandon after yes", list(lua.eval("ABANDONED").values()) == [5])
+lua.execute("GROUP = false; PARTY = {}; QuestSidebar.Refresh()")
+lua.execute("local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Kolkar') then r = q end end; r.scripts.OnClick(r, 'RightButton')")
+check("menu: share greyed out when solo", lua.eval("MENU.items[2].enabled") is False and "not in a party" in lua.eval("MENU.items[2].text"))
+check("no party markers when solo", row("Kolkar").tag.text == "")
+
+# ---- auto-share (off by default) --------------------------------------------------------------
+check("auto-share off by default", lua.eval("QuestSidebarDB.settings.autoShare") is False)
+lua.execute("PUSHES = {}; GROUP = true; PARTY = { { name = 'Brother', quests = {} } }")
+ev("QUEST_ACCEPTED", 5); lua.execute("run_timers(); run_timers(); run_timers()")
+check("off: nothing shared on accept", pushes() == [])
+lua.execute("QuestSidebar.UI.ToggleSettings()")
+names = [i.label.text for i in lua.eval("QuestSidebarSettings.items").values() if i.label]
+check("auto-share in settings", "Auto-share new quests with party" in names and "Hide grey (low level) quests" in names)
+lua.execute("local c = QuestSidebarSettings.items[8]; c:SetChecked(true); c.scripts.OnClick(c)")
+check("settings toggle turns auto-share on", lua.eval("QuestSidebarDB.settings.autoShare") is True)
+ev("QUEST_ACCEPTED", 5); lua.execute("run_timers(); run_timers(); run_timers()")
+check("on: new quest shared", pushes() == [5])
+lua.execute("PUSHES = {}; PARTY[1].quests[5] = true")
+ev("QUEST_ACCEPTED", 5); lua.execute("run_timers(); run_timers(); run_timers()")
+check("on: not sent back if the party has it", pushes() == [])
+lua.execute("PUSHES = {}; PARTY[1].quests[5] = nil")
+ev("QUEST_ACCEPTED", 0, 5); lua.execute("run_timers(); run_timers(); run_timers()")
+check("on: classic (index, questID) args", pushes() == [5])
+lua.execute("PUSHES = {}; GROUP = false")
+ev("QUEST_ACCEPTED", 5); lua.execute("run_timers(); run_timers()")
+check("on but solo: nothing", pushes() == [])
+lua.execute("SlashCmdList.QUESTSIDEBAR('autoshare')")
+check("/qsb autoshare toggles", lua.eval("QuestSidebarDB.settings.autoShare") is False)
+
+# ---- hide grey quests ---------------------------------------------------------------------------
+lua.execute("MYLEVEL = 20; QuestSidebar.Refresh()")
+check("grey shown by default", has("Kolkar"))
+lua.execute("local c = QuestSidebarSettings.items[9]; c:SetChecked(true); c.scripts.OnClick(c)")
+check("grey hidden (lvl 11 at 20)", not has("Kolkar") and has("Raptor"))
+check("grey but complete still shown", has("Plainstrider"))
+check("says how many hidden", "1 grey quest hidden" in lua.eval("QuestSidebar.UI.Empty().text"))
+lua.execute("SlashCmdList.QUESTSIDEBAR('grey')")
+check("/qsb grey shows them again", has("Kolkar"))
+
+# ---- search on All -----------------------------------------------------------------------------
+lua.execute("QuestSidebar.UI.SelectTab('all')")
+check("search box on All", lua.eval("QuestSidebarSearch.shown"))
+lua.execute("QuestSidebarSearch:SetText('RAPTOR'); QuestSidebarSearch.scripts.OnTextChanged(QuestSidebarSearch); run_timers()")
+check("search by title", qtitles() == [t for t in qtitles() if "Raptor" in t] and has("Raptor"))
+lua.execute("QuestSidebarSearch:SetText('elemental'); QuestSidebarSearch.scripts.OnTextChanged(QuestSidebarSearch); run_timers()")
+check("search by objective (zone opens)", has("Stonetalon") and hdrs() == ["Ashenvale"])
+lua.execute("QuestSidebarSearch:SetText('barrens'); QuestSidebarSearch.scripts.OnTextChanged(QuestSidebarSearch); run_timers()")
+check("search by zone shows the zone", hdrs() == ["The Barrens"] and has("Raptor") and has("Kolkar"))
+lua.execute("QuestSidebarSearch:SetText('zzz'); QuestSidebarSearch.scripts.OnTextChanged(QuestSidebarSearch); run_timers()")
+check("no matches message", "No quests match" in lua.eval("QuestSidebar.UI.Empty().text") and lua.eval("QuestSidebar.UI.Empty().shown"))
+lua.execute("QuestSidebarSearch:SetText(''); QuestSidebarSearch.scripts.OnTextChanged(QuestSidebarSearch); run_timers()")
+check("clear search: all zones back", "Ashenvale" in hdrs() and "The Barrens" in hdrs())
+lua.execute("QuestSidebar.UI.SelectTab('zone')")
+check("no search box on Current Zone", not lua.eval("QuestSidebarSearch.shown"))
+
+# ---- quest log full warning ---------------------------------------------------------------------
+lua.execute("QuestSidebar.Refresh()")
+check("normal count grey", lua.eval("QuestSidebar.UI.logFull") is False)
+lua.execute("C_QuestLog.GetMaxNumQuestsCanAccept = function() return 4 end; QuestSidebar.Refresh()")
+check("log full flagged", lua.eval("QuestSidebar.UI.logFull") is True)
+lua.execute("C_QuestLog.GetMaxNumQuestsCanAccept = nil; QuestSidebar.Refresh()")
 
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

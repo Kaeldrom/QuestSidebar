@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0 - 2026-11-14
+
+- **Party markers.** In a party, each quest shows how many party members have it, for example `1/2`. Hover over the quest to see who has it and who doesn't.
+- **Share all quests** now skips quests your whole party already has.
+- **Right-click menu** on a quest: Track, Share with party, Link in chat, Show in quest log, and Abandon quest (it asks first). Right-click used to only track the quest.
+- **Auto-share new quests with party.** A new setting, **off by default**. When it's on, any quest you pick up while in a party is shared straight away. Quests the whole party already has are not sent back. `/qsb autoshare` turns it on and off too.
+- **Ready to turn in** quests move to the top of their zone with a soft gold highlight.
+- **Search box** on the All tab. It searches quest names, objectives and zone names.
+- **Quest log full warning.** The count in the title turns orange when you have 3 or fewer slots left, and red when the log is full.
+- **Hide grey quests.** A new setting (`/qsb grey`) that hides quests far below your level. Quests that are ready to turn in always stay visible.
+
 ## 1.4.0 - 2026-11-14
 
 - New **Share all quests** button in the Current Zone tab. In a party, it shares every quest you have for the zone you are in, one after another, with a short gap between each.

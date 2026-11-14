@@ -15,6 +15,9 @@ local DEFAULT_W, DEFAULT_H = 300, 460
 local MIN_W, MIN_H, MAX_W, MAX_H = 230, 180, 700, 1200
 local HEADER_H = 24
 local SHARE_H = 22
+local SEARCH_H = 20
+local PARTY = "|cff66ddff"
+local ORANGE = "|cffff9933"
 local PAD = 6
 
 local GREY = "|cff9a9a9a"
@@ -47,6 +50,56 @@ end
 
 local function Width()
     return math.max(MIN_W, (db and db.size and db.size[1]) or DEFAULT_W) - 34
+end
+
+-- Grey = so far below your level it gives almost no XP (same rule as the game).
+local function GreyLevel(lvl)
+    if lvl <= 5 then return 0 end
+    if lvl <= 39 then return lvl - 5 - math.floor(lvl / 10) end
+    if lvl <= 59 then return lvl - 1 - math.floor(lvl / 5) end
+    return lvl - 9
+end
+
+function UI.IsGrey(q)
+    if q.complete or not q.level or q.level <= 0 then return false end
+    local me = UnitLevel and UnitLevel("player")
+    if not me or me <= 0 then return false end
+    if GetQuestGreenRange then
+        local ok, range = pcall(GetQuestGreenRange)
+        if ok and type(range) == "number" then return me - q.level > range end
+    end
+    return q.level <= GreyLevel(me)
+end
+
+-- The right-click menu: { text, func, disabled } rows (also used by the tests)
+function UI.MenuItems(q)
+    local items = {}
+    local function Add(text, func, disabled) items[#items + 1] = { text = text, func = func, disabled = disabled } end
+    Add(q.tracked and "Stop tracking" or "Track", function() QSB.ToggleTrack(q) end)
+    local canShare = QSB.CanPush(q)
+    Add(canShare and "Share with party" or (QSB.InGroup() and "Can't be shared" or "Share with party (not in a party)"),
+        function() QSB.ShareQuest(q) end, not canShare)
+    Add("Link in chat", function()
+        if ChatFrame_OpenChat and ChatEdit_GetActiveWindow and not ChatEdit_GetActiveWindow() then ChatFrame_OpenChat("") end
+        QSB.LinkQuest(q)
+    end)
+    Add("Show in quest log", function() QSB.OpenQuest(q) end)
+    Add("|cffff5050Abandon quest|r", function() QSB.Abandon(q) end)
+    return items
+end
+
+local function ShowMenu(owner, q)
+    if not (MenuUtil and MenuUtil.CreateContextMenu) then
+        QSB.ToggleTrack(q) -- old clients: right-click just tracks
+        return
+    end
+    MenuUtil.CreateContextMenu(owner, function(_, root)
+        root:CreateTitle(q.title)
+        for _, it in ipairs(UI.MenuItems(q)) do
+            local b = root:CreateButton(it.text, it.func)
+            if it.disabled and b and b.SetEnabled then b:SetEnabled(false) end
+        end
+    end)
 end
 
 local function SetGradient(tex, orient, r1, g1, b1, a1, r2, g2, b2, a2)
@@ -128,6 +181,11 @@ local function NewQuest()
     local hl = r:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints()
     hl:SetColorTexture(1, 1, 1, 0.05)
+    -- soft gold wash behind quests that are ready to hand in
+    r.ready = r:CreateTexture(nil, "BACKGROUND")
+    r.ready:SetAllPoints()
+    r.ready:SetColorTexture(1, 0.82, 0, 0.08)
+    r.ready:Hide()
 
     r.icon = r:CreateTexture(nil, "ARTWORK")
     r.icon:SetSize(20, 20)
@@ -179,13 +237,18 @@ local function NewQuest()
     r:SetScript("OnClick", function(self, button)
         local q = self.quest
         if IsModifiedClick and IsModifiedClick("CHATLINK") then QSB.LinkQuest(q)
-        elseif button == "RightButton" then QSB.ToggleTrack(q)
+        elseif button == "RightButton" then ShowMenu(self, q)
         else QSB.ToggleQuest(q) end
     end)
     r:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine(self.quest.title)
-        GameTooltip:AddLine("Click: show/hide objectives   Shift-click: link in chat   Right-click: track", 0.8, 0.8, 0.8, true)
+        local q = self.quest
+        GameTooltip:AddLine(q.title)
+        if q.party then
+            if #q.party.have > 0 then GameTooltip:AddLine("Party on this quest: " .. table.concat(q.party.have, ", "), 0.4, 0.87, 1, true) end
+            if #q.party.missing > 0 then GameTooltip:AddLine("Doesn't have it: " .. table.concat(q.party.missing, ", "), 0.6, 0.6, 0.6, true) end
+        end
+        GameTooltip:AddLine("Click: show/hide objectives   Shift-click: link in chat   Right-click: menu", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -204,11 +267,18 @@ local function FillQuest(r, q, width, showDetails)
     if q.failed then r.icon:SetVertexColor(1, 0.3, 0.3) else r.icon:SetVertexColor(1, 1, 1) end
 
     local tag = q.tag and (TAG .. "(" .. q.tag .. ")|r") or ""
+    -- party marker: how many of your party have this quest
+    q.party = QSB.PartyOn(q)
+    if q.party then
+        local n, total = #q.party.have, #q.party.have + #q.party.missing
+        tag = tag .. (tag ~= "" and " " or "") .. (n > 0 and PARTY or GREY) .. n .. "/" .. total .. "|r"
+    end
     r.tag:SetText(tag)
-    local tagW = q.tag and ((r.tag:GetStringWidth() or 0) + 4) or 0
+    local tagW = tag ~= "" and ((r.tag:GetStringWidth() or 0) + 4) or 0
     r.title:SetWidth(width - 30 - 46 - tagW)
     r.title:SetText(LevelColor(q.level) .. "[" .. (q.level or "?") .. "] " .. q.title .. "|r")
     r.track:SetChecked(q.tracked)
+    if q.complete then r.ready:Show() else r.ready:Hide() end
 
     local h = math.max(22, (r.title:GetStringHeight() or 14) + 6)
 
@@ -266,7 +336,21 @@ function UI.Draw(groups)
 
     local total = 0
     for _, g in ipairs(groups) do total = total + #g.quests end
-    if UI.SetTitle then UI.SetTitle("Quests  " .. GREY .. total .. "/25|r") end
+    local max = (C_QuestLog and C_QuestLog.GetMaxNumQuestsCanAccept and C_QuestLog.GetMaxNumQuestsCanAccept()) or 25
+    if type(max) ~= "number" or max <= 0 then max = 25 end
+    -- the count warns you before a quest giver turns you away
+    local countColor = (total >= max and RED) or (total >= max - 3 and ORANGE) or GREY
+    if UI.SetTitle then UI.SetTitle("Quests  " .. countColor .. total .. "/" .. max .. "|r") end
+    UI.logFull = total >= max
+
+    -- hide grey quests (setting); ones ready to hand in always stay
+    local hideGrey = db.settings.hideGrey
+    local function Visible(list)
+        if not hideGrey then return list end
+        local out = {}
+        for _, q in ipairs(list) do if not UI.IsGrey(q) then out[#out + 1] = q end end
+        return out
+    end
     if db.minimized then return end
 
     local function Header(g, open)
@@ -301,6 +385,8 @@ function UI.Draw(groups)
     empty:Hide()
     local share = UI.shareBtn
     if share then share:Hide() end
+    local search = UI.search
+    if search then search:Hide() end
     if UI.tab == "zone" then
         local g = QSB.HereGroup(groups)
         if g then
@@ -319,21 +405,64 @@ function UI.Draw(groups)
                 share:Show()
                 y = y + SHARE_H + 4
             end
-            for _, q in ipairs(g.quests) do Quest(q, true) end
+            local shown = Visible(g.quests)
+            for _, q in ipairs(shown) do Quest(q, true) end
+            if #shown < #g.quests then
+                empty:ClearAllPoints()
+                empty:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -y - 4)
+                empty:SetText(GREY .. (#g.quests - #shown) .. " grey quest" .. (#g.quests - #shown == 1 and "" or "s") .. " hidden.|r")
+                empty:Show()
+                y = y + 22
+            end
         else
+            empty:ClearAllPoints()
+            empty:SetPoint("TOPLEFT", 8, -12)
             empty:SetText(GREY .. "No quests for " .. (here or "this zone") .. ".|r\n\n" .. "Open the |cffffd100All|r tab to see your other quests.")
             empty:Show()
         end
     else
+        if search then
+            search:ClearAllPoints()
+            search:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -y - 2)
+            search:SetWidth(width - 10)
+            search:Show()
+            y = y + SEARCH_H + 6
+        end
+        local filter = UI.filter
+        local matched = 0
         for _, g in ipairs(groups) do
-            local open = QSB.IsOpen(g.zone)
-            Header(g, open)
-            if open then
-                for _, q in ipairs(g.quests) do Quest(q, false) end
+            local list = Visible(g.quests)
+            if filter then
+                -- a zone name match shows the whole zone; otherwise only matching quests
+                if not g.zone:lower():find(filter, 1, true) then
+                    local hits = {}
+                    for _, q in ipairs(list) do
+                        local hay = q.title:lower()
+                        for _, o in ipairs(q.objectives or {}) do hay = hay .. "\n" .. o.text:lower() end
+                        if hay:find(filter, 1, true) then hits[#hits + 1] = q end
+                    end
+                    list = hits
+                end
+                if #list > 0 then
+                    matched = matched + #list
+                    Header(g, true)
+                    for _, q in ipairs(list) do Quest(q, false) end
+                end
+            elseif #list > 0 then
+                local open = QSB.IsOpen(g.zone)
+                Header(g, open)
+                if open then
+                    for _, q in ipairs(list) do Quest(q, false) end
+                end
             end
         end
+        empty:ClearAllPoints()
+        empty:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -y - 8)
         if total == 0 then
             empty:SetText(GREY .. "Your quest log is empty.|r")
+            empty:Show()
+        elseif filter and matched == 0 then
+            empty:SetText(GREY .. "No quests match \"" .. filter .. "\".|r")
             empty:Show()
         end
     end
@@ -509,7 +638,7 @@ end
 
 local function BuildSettings()
     settings = CreateFrame("Frame", "QuestSidebarSettings", panel, "BackdropTemplate")
-    settings:SetSize(220, 276)
+    settings:SetSize(236, 324)
     settings:SetPoint("TOPRIGHT", panel, "TOPLEFT", -2, 0)
     settings:SetFrameStrata("HIGH")
     settings:EnableMouse(true)
@@ -538,6 +667,8 @@ local function BuildSettings()
     items[#items + 1] = Check(settings, "Hide Blizzard's tracker", "hideTracker", function() UI.ApplyTracker(true) end)
     items[#items + 1] = Check(settings, "Lock position", "locked")
     items[#items + 1] = Check(settings, "Minimap button", "minimap", function() UI.ApplyMinimap() end)
+    items[#items + 1] = Check(settings, "Auto-share new quests with party", "autoShare")
+    items[#items + 1] = Check(settings, "Hide grey (low level) quests", "hideGrey")
 
     local y = -32
     for _, it in ipairs(items) do
@@ -545,10 +676,11 @@ local function BuildSettings()
         y = y - (it.slider and 40 or 24)
     end
     local reset = CreateFrame("Button", nil, settings, "UIPanelButtonTemplate")
-    reset:SetSize(196, 20)
+    reset:SetSize(212, 20)
     reset:SetPoint("TOPLEFT", 12, y - 6)
     reset:SetText("Reset size & position")
     reset:SetScript("OnClick", function() UI.ResetPosition(); QSB.Refresh() end)
+    settings:SetHeight(-y + 40)
 
     settings.items = items
     settings:SetScript("OnShow", function() for _, it in ipairs(items) do it.Sync() end end)
@@ -782,6 +914,26 @@ function UI.Init(savedDB)
     share:SetScript("OnLeave", function() GameTooltip:Hide() end)
     share:Hide()
     UI.shareBtn = share
+
+    -- All tab: search box (title, objectives or zone)
+    local okS, box = pcall(CreateFrame, "EditBox", "QuestSidebarSearch", content, "SearchBoxTemplate")
+    if not okS or not box then box = CreateFrame("EditBox", "QuestSidebarSearch", content, "InputBoxTemplate") end
+    box:SetHeight(SEARCH_H)
+    box:SetAutoFocus(false)
+    if type(box.Instructions) == "table" and box.Instructions.SetText then box.Instructions:SetText("Search quests") end
+    box:HookScript("OnTextChanged", function(self)
+        local t = (self:GetText() or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+        local f = t ~= "" and t or nil
+        if f ~= UI.filter then
+            UI.filter = f
+            scrollY = 0
+            QSB.QueueRefresh()
+        end
+    end)
+    box:HookScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    box:HookScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    box:Hide()
+    UI.search = box
 
     empty = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     empty:SetPoint("TOPLEFT", 8, -12)

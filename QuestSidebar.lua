@@ -13,7 +13,8 @@ local ADDON = ...
 local QSB = {}
 QuestSidebar = QSB
 
-local DEFAULTS = { autoZone = true, hideTracker = true, locked = false, scale = 1, showObjectives = true, opacity = 1, minimap = true }
+local DEFAULTS = { autoZone = true, hideTracker = true, locked = false, scale = 1, showObjectives = true, opacity = 1, minimap = true,
+                   autoShare = false, hideGrey = false }
 
 local db
 QSB.open = {}          -- zones opened by hand this visit (cleared when you change zone)
@@ -156,9 +157,18 @@ function QSB.ReadLog()
             end
         end
     end
-    -- drop empty headers
+    -- drop empty headers; ready-to-turn-in quests go to the top of their zone
     for i = #groups, 1, -1 do
-        if #groups[i].quests == 0 then table.remove(groups, i) end
+        local qs = groups[i].quests
+        if #qs == 0 then
+            table.remove(groups, i)
+        else
+            for n, q in ipairs(qs) do q.order = n end
+            table.sort(qs, function(x, y)
+                if x.complete ~= y.complete then return x.complete end
+                return x.order < y.order
+            end)
+        end
     end
     return groups
 end
@@ -326,12 +336,68 @@ local function Pushable(q)
     return true
 end
 
+---------------------------------------------------------------------------
+-- Who in the party has a quest
+---------------------------------------------------------------------------
+local function PartyUnits()
+    local units = {}
+    if not QSB.InGroup() then return units end
+    if IsInRaid and IsInRaid() then return units end -- markers are for 5-man parties
+    local n = (GetNumSubgroupMembers and GetNumSubgroupMembers()) or ((GetNumGroupMembers and GetNumGroupMembers() or 1) - 1)
+    for i = 1, math.min(4, n or 0) do
+        local u = "party" .. i
+        if not UnitExists or UnitExists(u) then units[#units + 1] = u end
+    end
+    return units
+end
+
+local function UnitOnQuest(unit, q)
+    local ok, on
+    if C_QuestLog and C_QuestLog.IsUnitOnQuest then
+        ok, on = pcall(C_QuestLog.IsUnitOnQuest, unit, q.questID)
+    elseif IsUnitOnQuest then
+        ok, on = pcall(IsUnitOnQuest, q.index, unit)
+    else
+        return nil
+    end
+    if not ok or IsSecret(on) then return nil end
+    return on == true or on == 1
+end
+
+-- { have = {names}, missing = {names} } or nil when solo / the client can't tell
+function QSB.PartyOn(q)
+    local units = PartyUnits()
+    if #units == 0 then return nil end
+    local have, missing = {}, {}
+    for _, u in ipairs(units) do
+        local on = UnitOnQuest(u, q)
+        if on == nil then return nil end
+        local name = UnitName and UnitName(u)
+        if not name or IsSecret(name) then name = u end
+        if on then have[#have + 1] = name else missing[#missing + 1] = name end
+    end
+    return { have = have, missing = missing }
+end
+
+-- everyone in the party already has it: no point sharing
+local function EveryoneHas(q)
+    local p = QSB.PartyOn(q)
+    return p ~= nil and #p.missing == 0
+end
+
 local function FinishShare(msg)
     if not share then return end
     local s = share
     share = nil
     RestoreSelection(s.oldSel)
-    Print(msg or ("Shared " .. s.sent .. " quest" .. (s.sent == 1 and "" or "s") .. " from " .. s.zone .. " with your party."))
+    if not msg then
+        if s.sent == 1 and s.single then
+            msg = "Shared " .. s.single .. " with your party."
+        else
+            msg = "Shared " .. s.sent .. " quest" .. (s.sent == 1 and "" or "s") .. (s.zone and (" from " .. s.zone) or "") .. " with your party."
+        end
+    end
+    Print(msg)
     QSB.Refresh()
 end
 
@@ -348,27 +414,125 @@ local function ShareStep()
     C_Timer.After(SHARE_GAP, ShareStep)
 end
 
-function QSB.ShareZone()
-    if share then return Print("Already sharing quests, give it a moment.") end
-    if not QSB.InGroup() then return Print("Join a party first, then share your quests.") end
-    if not QuestLogPushQuest then return Print("This client can't share quests.") end
-    local g = QSB.HereGroup(QSB.ReadLog())
-    if not g then return Print("You have no quests for " .. (currentZone or "this zone") .. ".") end
-    local oldSel = (C_QuestLog and C_QuestLog.GetSelectedQuest and C_QuestLog.GetSelectedQuest())
+local function SelectedNow()
+    return (C_QuestLog and C_QuestLog.GetSelectedQuest and C_QuestLog.GetSelectedQuest())
         or (GetQuestLogSelection and GetQuestLogSelection())
-    local queue, skipped = {}, 0
-    for _, q in ipairs(g.quests) do
-        if Pushable(q) then queue[#queue + 1] = q else skipped = skipped + 1 end
+end
+
+local function PushableKeepSel(q)
+    local oldSel = SelectedNow()
+    local ok = Pushable(q)
+    RestoreSelection(oldSel)
+    return ok
+end
+
+-- Queue quests to share. Joins a share that is already running.
+local function QueueShare(list, zone)
+    if share then
+        local queued = {}
+        for _, q in ipairs(share.queue) do queued[q.questID] = true end
+        if share.current then queued[share.current.questID] = true end
+        for _, q in ipairs(list) do
+            if not queued[q.questID] and not share.tries[q.questID] then share.queue[#share.queue + 1] = q end
+        end
+        share.single = nil
+        return
     end
-    if #queue == 0 then
-        RestoreSelection(oldSel)
-        return Print("None of your " .. g.zone .. " quests can be shared.")
-    end
-    share = { zone = g.zone, queue = queue, tries = {}, sent = 0, oldSel = oldSel }
-    Print("Sharing " .. #queue .. " quest" .. (#queue == 1 and "" or "s") .. " from " .. g.zone
-        .. (skipped > 0 and (" (" .. skipped .. " can't be shared)") or "") .. "...")
+    share = { zone = zone, queue = list, tries = {}, sent = 0, oldSel = SelectedNow(),
+              single = (#list == 1 and not zone) and list[1].title or nil }
     QSB.Refresh()
     ShareStep()
+end
+
+local function CanShare()
+    if not QSB.InGroup() then Print("Join a party first, then share your quests."); return false end
+    if not QuestLogPushQuest then Print("This client can't share quests."); return false end
+    return true
+end
+
+function QSB.ShareZone()
+    if share and share.zone then return Print("Already sharing quests, give it a moment.") end
+    if not CanShare() then return end
+    local g = QSB.HereGroup(QSB.ReadLog())
+    if not g then return Print("You have no quests for " .. (currentZone or "this zone") .. ".") end
+    local queue, skipped, everyone = {}, 0, 0
+    for _, q in ipairs(g.quests) do
+        if not PushableKeepSel(q) then skipped = skipped + 1
+        elseif EveryoneHas(q) then everyone = everyone + 1
+        else queue[#queue + 1] = q end
+    end
+    local notes = {}
+    if skipped > 0 then notes[#notes + 1] = skipped .. " can't be shared" end
+    if everyone > 0 then notes[#notes + 1] = everyone .. " the whole party already has" end
+    local note = #notes > 0 and (" (" .. table.concat(notes, ", ") .. ")") or ""
+    if #queue == 0 then
+        return Print("Nothing to share from " .. g.zone .. note .. ".")
+    end
+    Print("Sharing " .. #queue .. " quest" .. (#queue == 1 and "" or "s") .. " from " .. g.zone .. note .. "...")
+    QueueShare(queue, g.zone)
+end
+
+function QSB.ShareQuest(q)
+    if not CanShare() then return end
+    if not PushableKeepSel(q) then return Print(q.title .. " can't be shared.") end
+    if EveryoneHas(q) then return Print("Everyone in your party already has " .. q.title .. ".") end
+    QueueShare({ q }, nil)
+end
+
+function QSB.CanPush(q)
+    if not QSB.InGroup() or not QuestLogPushQuest then return false end
+    return PushableKeepSel(q)
+end
+
+-- Auto-share (setting, off by default): a quest you pick up while in a party is
+-- shared straight away. Quests the whole party already has (for example one
+-- a friend just shared with you) are not sent back.
+local function FindQuest(questID)
+    for _, g in ipairs(QSB.ReadLog()) do
+        for _, q in ipairs(g.quests) do if q.questID == questID then return q end end
+    end
+end
+
+local function OnQuestAccepted(a, b)
+    if not db or not db.settings.autoShare or not QSB.InGroup() or not QuestLogPushQuest then return end
+    local questID = b or a
+    if type(questID) ~= "number" or questID == 0 then return end
+    C_Timer.After(1, function()
+        if not QSB.InGroup() then return end
+        local q = FindQuest(questID)
+        if q and PushableKeepSel(q) and not EveryoneHas(q) then QueueShare({ q }, nil) end
+    end)
+end
+
+---------------------------------------------------------------------------
+-- Abandon (asks first)
+---------------------------------------------------------------------------
+function QSB.AbandonNow(q)
+    if C_QuestLog and C_QuestLog.SetSelectedQuest and C_QuestLog.SetAbandonQuest then
+        C_QuestLog.SetSelectedQuest(q.questID)
+        C_QuestLog.SetAbandonQuest()
+        C_QuestLog.AbandonQuest()
+    elseif SelectQuestLogEntry and SetAbandonQuest then
+        SelectQuestLogEntry(q.index)
+        SetAbandonQuest()
+        AbandonQuest()
+    end
+    Print("Abandoned " .. q.title .. ".")
+    QSB.QueueRefresh()
+end
+
+function QSB.Abandon(q)
+    if StaticPopupDialogs and StaticPopup_Show then
+        StaticPopupDialogs.QUESTSIDEBAR_ABANDON = StaticPopupDialogs.QUESTSIDEBAR_ABANDON or {
+            text = "Abandon \"%s\"?", button1 = YES or "Yes", button2 = NO or "No",
+            OnAccept = function(self, data) QSB.AbandonNow(data or self.data) end,
+            timeout = 0, whileDead = true, hideOnEscape = true, showAlert = true,
+        }
+        local dialog = StaticPopup_Show("QUESTSIDEBAR_ABANDON", q.title, nil, q)
+        if dialog then dialog.data = q end
+    else
+        QSB.AbandonNow(q)
+    end
 end
 
 -- "Name is busy." comes back as a system message: try that quest again later
@@ -431,6 +595,13 @@ local function Slash(msg)
         Print("Minimap button: " .. OnOff(s.minimap))
     elseif cmd == "share" then
         QSB.ShareZone()
+    elseif cmd == "autoshare" then
+        s.autoShare = not s.autoShare
+        Print("Auto-share new quests with your party: " .. OnOff(s.autoShare))
+    elseif cmd == "grey" or cmd == "gray" then
+        s.hideGrey = not s.hideGrey
+        Print("Hide grey (low level) quests: " .. OnOff(s.hideGrey))
+        QSB.Refresh()
     elseif cmd == "min" or cmd == "minimize" then
         QSB.UI.ToggleMinimized()
     elseif cmd == "auto" then
@@ -464,9 +635,11 @@ local function Slash(msg)
         Print("/qsb objectives - show objective lines (" .. OnOff(s.showObjectives) .. ")")
         Print("/qsb settings - open the settings (or click the cog on the window)")
         Print("/qsb share - share all your quests for this zone with your party")
+        Print("/qsb autoshare - share quests you pick up with your party (" .. OnOff(s.autoShare) .. ")")
+        Print("/qsb grey - hide grey (low level) quests (" .. OnOff(s.hideGrey) .. ")")
         Print("/qsb min - minimize/restore   /qsb minimap - minimap button on/off")
         Print("/qsb opacity 70 | lock | scale 0.8 | reset")
-        Print("Click a zone to open/close it, Shift-click to pin it open. Click a quest to open it, Shift-click to link, right-click to track.")
+        Print("Click a zone to open/close it, Shift-click to pin it open. Click a quest to show/hide its objectives, Shift-click to link, right-click for more.")
     end
 end
 
@@ -498,6 +671,9 @@ frame:SetScript("OnEvent", function(_, event, ...)
         if db then OnZoneChanged() end
     elseif event == "CHAT_MSG_SYSTEM" then
         OnSystemMessage(...)
+    elseif event == "QUEST_ACCEPTED" then
+        OnQuestAccepted(...)
+        QSB.QueueRefresh()
     elseif event == "PLAYER_REGEN_ENABLED" then
         if db then QSB.UI.ApplyTracker(); QSB.QueueRefresh() end
     elseif db then
