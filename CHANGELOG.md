@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.2 - 2026-11-14
+
+- The settings panel has an **X** in its corner to close it, so you no longer need to click the cog again.
+
 ## 1.8.1 - 2026-11-14
 
 - **Fixed:** finished quests weren't recognised in the game, so the **Turn in** tab was empty and the **Ready to turn in** section never appeared. The game no longer reports "finished" in the quest log entry, so the addon now asks each quest directly, the same way Questie and Shortest Path Forever do. Failed quests are detected the same way.

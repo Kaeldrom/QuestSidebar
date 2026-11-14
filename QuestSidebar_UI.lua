@@ -781,6 +781,19 @@ local function BuildSettings()
     t:SetPoint("TOPLEFT", 12, -10)
     t:SetText("Quest Sidebar settings")
 
+    -- X in the corner closes the settings (no need to click the cog again)
+    local okX, close = pcall(CreateFrame, "Button", nil, settings, "UIPanelCloseButton")
+    if not okX or not close then
+        close = CreateFrame("Button", nil, settings)
+        close:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
+        close:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
+        close:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight", "ADD")
+    end
+    close:SetSize(24, 24)
+    close:SetPoint("TOPRIGHT", -2, -2)
+    close:SetScript("OnClick", function() settings:Hide() end)
+    settings.close = close
+
     local items = {}
     items[#items + 1] = Slider(settings, "Opacity", 0.1, 1, 0.05,
         function() return db.settings.opacity or 1 end,

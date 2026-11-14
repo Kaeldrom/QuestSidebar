@@ -645,5 +645,13 @@ n = lua.eval("ROUTES")
 lua.execute("local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Kolkar') then r = q end end; r.route.scripts.OnClick(r.route); run_timers()")
 check("routing another quest switches", lua.eval("ROUTES") == n + 1 and lua.eval("SUPER") == 5 and row("Kolkar").route.on.shown and not row("Raptor").route.on.shown)
 
+# ---- 1.8.2: X closes settings ----
+lua.execute("QuestSidebarSettings:Hide(); QuestSidebar.UI.ToggleSettings()")
+check("settings open", lua.eval("QuestSidebarSettings:IsShown()"))
+lua.execute("QuestSidebarSettings.close.scripts.OnClick(QuestSidebarSettings.close)")
+check("X closes settings", not lua.eval("QuestSidebarSettings:IsShown()"))
+lua.execute("QuestSidebar.UI.cog.scripts.OnClick(QuestSidebar.UI.cog)")
+check("cog still opens it after", lua.eval("QuestSidebarSettings:IsShown()"))
+
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
