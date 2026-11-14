@@ -17,6 +17,7 @@ By default it hides Blizzard's quest tracker so the two don't overlap (`/qsb tra
 | Command | What it does |
 |---|---|
 | `/qsb` | Show/hide the sidebar (or click the minimap button) |
+| `/qsb share` | Share all your quests for the zone you are in with your party (same as the **Share all quests** button) |
 | `/qsb min` | Minimize to the title bar / restore |
 | `/qsb minimap` | Minimap button on/off |
 | `/qsb settings` | Open the settings (same as the cog in the title bar) |

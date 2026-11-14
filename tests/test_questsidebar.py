@@ -121,6 +121,13 @@ function GetZoneText() return ZONE end
 function QuestMapFrame_OpenToQuestDetails(id) calls[#calls+1] = "open " .. id end
 function ChatEdit_InsertLink(l) calls[#calls+1] = "link " .. l end
 SlashCmdList = {}
+GROUP = false
+function IsInGroup() return GROUP end
+PUSHABLE = {}
+PUSHES = {}
+function QuestLogPushQuest() PUSHES[#PUSHES+1] = SELECTED end
+C_QuestLog.IsPushableQuest = function(id) return PUSHABLE[id] ~= false end
+ERR_QUEST_PUSH_BUSY_S = "%s is busy."
 '''
 
 passed = failed = 0
@@ -324,6 +331,55 @@ lua.execute("local c = QuestSidebarSettings.items[7]; c:SetChecked(false); c.scr
 check("settings checkbox hides minimap button", not lua.eval(mb + ":IsShown()") and lua.eval("QuestSidebarDB.settings.minimap") is False)
 lua.execute("SlashCmdList.QUESTSIDEBAR('minimap')")
 check("/qsb minimap brings it back", lua.eval(mb + ":IsShown()"))
+
+# ---- share all quests -----------------------------------------------------------
+def pushes(): return list(lua.eval("PUSHES").values())
+def last_print(): p = lua.eval("printed"); return p[len(p)]
+SB = "QuestSidebar.UI.shareBtn"
+lua.execute("""LOG = {
+  { title = "The Barrens", isHeader = true },
+  { title = "Plainstrider Menace", level = 12, questID = 2, isComplete = true, obj = {} },
+  { title = "Raptor Thieves", level = 15, questID = 3, isComplete = false, obj = {} },
+  { title = "Ashenvale", isHeader = true },
+  { title = "Stonetalon Standstill", level = 25, questID = 1, isComplete = false, obj = {} },
+}""")
+lua.execute("ZONE = 'The Barrens'; QuestSidebar.UI.SelectTab('zone'); SELECTED = 99")
+ev("ZONE_CHANGED_NEW_AREA"); lua.execute("run_timers()")
+check("share button in Current Zone", lua.eval(SB + ".shown") and lua.eval(SB + ".text") == "Share all quests")
+check("share disabled when solo", lua.eval(SB + ".disabled") is True)
+lua.execute("QuestSidebar.ShareZone()")
+check("solo: asks to join a party", "Join a party" in last_print() and pushes() == [])
+lua.execute("GROUP = true"); ev("GROUP_ROSTER_UPDATE"); lua.execute("run_timers()")
+check("share enabled in a group", lua.eval(SB + ".disabled") is False)
+lua.execute(SB + ".scripts.OnClick(" + SB + ")")
+check("first quest shared at once", pushes() == [2])
+check("button says sharing", lua.eval(SB + ".text") == "Sharing..." and lua.eval(SB + ".disabled") is True)
+lua.execute(SB + ".scripts.OnClick(" + SB + ")")
+check("no double share", pushes() == [2])
+lua.execute("run_timers()")
+check("second quest after a gap", pushes() == [2, 3])
+lua.execute("run_timers()")
+check("done: summary", "Shared 2 quests from The Barrens" in last_print())
+check("done: selection restored", lua.eval("SELECTED") == 99)
+check("done: button back", lua.eval(SB + ".text") == "Share all quests" and lua.eval(SB + ".disabled") is False)
+check("only this zone's quests", 1 not in pushes() and 4 not in pushes())
+
+lua.execute("PUSHES = {}; SlashCmdList.QUESTSIDEBAR('share')")
+ev("CHAT_MSG_SYSTEM", "Thrall is busy.")
+lua.execute("run_timers(); run_timers(); run_timers()")
+check("busy: quest retried later", pushes() == [2, 3, 2])
+check("busy: still counted once", "Shared 2 quests" in last_print())
+
+lua.execute("PUSHES = {}; PUSHABLE[3] = false; QuestSidebar.ShareZone()")
+check("unshareable quest skipped", "1 can't be shared" in last_print())
+lua.execute("run_timers(); run_timers()")
+check("only shareable pushed", pushes() == [2] and "Shared 1 quest from" in last_print())
+lua.execute("PUSHABLE[3] = nil")
+
+lua.execute("PUSHES = {}; QuestSidebar.ShareZone(); GROUP = false; run_timers()")
+check("leaving the group stops sharing", pushes() == [2] and "no longer in a group" in last_print())
+lua.execute("run_timers(); QuestSidebar.UI.SelectTab('all')")
+check("no share button in All", not lua.eval(SB + ".shown"))
 
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

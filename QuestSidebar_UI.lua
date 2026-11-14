@@ -14,6 +14,7 @@ QSB.UI = UI
 local DEFAULT_W, DEFAULT_H = 300, 460
 local MIN_W, MIN_H, MAX_W, MAX_H = 230, 180, 700, 1200
 local HEADER_H = 24
+local SHARE_H = 22
 local PAD = 6
 
 local GREY = "|cff9a9a9a"
@@ -298,10 +299,26 @@ function UI.Draw(groups)
     end
 
     empty:Hide()
+    local share = UI.shareBtn
+    if share then share:Hide() end
     if UI.tab == "zone" then
         local g = QSB.HereGroup(groups)
         if g then
             Header(g, true)
+            if share then
+                share:ClearAllPoints()
+                share:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
+                share:SetWidth(width)
+                if QSB.Sharing() then
+                    share:SetText("Sharing...")
+                    share:Disable()
+                else
+                    share:SetText("Share all quests")
+                    if QSB.InGroup() then share:Enable() else share:Disable() end
+                end
+                share:Show()
+                y = y + SHARE_H + 4
+            end
             for _, q in ipairs(g.quests) do Quest(q, true) end
         else
             empty:SetText(GREY .. "No quests for " .. (here or "this zone") .. ".|r\n\n" .. "Open the |cffffd100All|r tab to see your other quests.")
@@ -745,6 +762,26 @@ function UI.Init(savedDB)
         scroll:SetVerticalScroll(v)
     end)
     UI.bar = bar
+
+    -- Current Zone: share every quest here with your party
+    local share = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    share:SetHeight(SHARE_H)
+    share:SetText("Share all quests")
+    share:SetMotionScriptsWhileDisabled(true)
+    share:SetScript("OnClick", function() QSB.ShareZone() end)
+    share:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("Share all quests")
+        if QSB.InGroup() then
+            GameTooltip:AddLine("Shares every quest for this zone with your party, one after another.", 0.8, 0.8, 0.8, true)
+        else
+            GameTooltip:AddLine("Join a party to share your quests.", 1, 0.4, 0.4, true)
+        end
+        GameTooltip:Show()
+    end)
+    share:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    share:Hide()
+    UI.shareBtn = share
 
     empty = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     empty:SetPoint("TOPLEFT", 8, -12)

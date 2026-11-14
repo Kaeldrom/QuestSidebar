@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0 - 2026-11-14
+
+- New **Share all quests** button in the Current Zone tab. In a party, it shares every quest you have for the zone you are in, one after another, with a short gap between each.
+- If a party member is busy (they still have the last shared quest open), that quest is tried again at the end, up to 3 times.
+- Quests that the game won't let you share are skipped, and the chat message tells you how many.
+- When you're not in a group the button is greyed out. `/qsb share` does the same as the button.
+
 ## 1.3.1 - 2026-11-14
 
 - The settings button is now a proper cog symbol. It is gold when you hover over it.

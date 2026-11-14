@@ -293,6 +293,102 @@ function QSB.ToggleTrack(q)
 end
 
 ---------------------------------------------------------------------------
+-- Share every quest in the zone you're in with your party
+---------------------------------------------------------------------------
+-- The game shares the quest selected in the log, one at a time, so we walk the
+-- zone's quests with a short gap between each. If a party member is busy (they
+-- still have the last shared quest open), that quest goes to the back of the
+-- queue and is tried again, up to SHARE_TRIES times.
+local SHARE_GAP, SHARE_TRIES = 1.5, 3
+local share -- { zone, queue = {q...}, tries = {[id]=n}, current, sent, oldSel }
+
+function QSB.InGroup()
+    if IsInGroup then return IsInGroup() and true or false end
+    return (GetNumGroupMembers and GetNumGroupMembers() or 0) > 0
+end
+
+function QSB.Sharing() return share ~= nil end
+
+local function Select(q)
+    if C_QuestLog and C_QuestLog.SetSelectedQuest then C_QuestLog.SetSelectedQuest(q.questID)
+    elseif SelectQuestLogEntry then SelectQuestLogEntry(q.index) end
+end
+
+local function RestoreSelection(old)
+    if not old or old == 0 then return end
+    if C_QuestLog and C_QuestLog.SetSelectedQuest then C_QuestLog.SetSelectedQuest(old)
+    elseif SelectQuestLogEntry then SelectQuestLogEntry(old) end
+end
+
+local function Pushable(q)
+    if C_QuestLog and C_QuestLog.IsPushableQuest then return C_QuestLog.IsPushableQuest(q.questID) and true or false end
+    if GetQuestLogPushable then Select(q); return GetQuestLogPushable() and true or false end
+    return true
+end
+
+local function FinishShare(msg)
+    if not share then return end
+    local s = share
+    share = nil
+    RestoreSelection(s.oldSel)
+    Print(msg or ("Shared " .. s.sent .. " quest" .. (s.sent == 1 and "" or "s") .. " from " .. s.zone .. " with your party."))
+    QSB.Refresh()
+end
+
+local function ShareStep()
+    if not share then return end
+    if not QSB.InGroup() then return FinishShare("Stopped sharing: you're no longer in a group.") end
+    local q = table.remove(share.queue, 1)
+    if not q then return FinishShare() end
+    share.current = q
+    Select(q)
+    QuestLogPushQuest()
+    share.tries[q.questID] = (share.tries[q.questID] or 0) + 1
+    if share.tries[q.questID] == 1 then share.sent = share.sent + 1 end
+    C_Timer.After(SHARE_GAP, ShareStep)
+end
+
+function QSB.ShareZone()
+    if share then return Print("Already sharing quests, give it a moment.") end
+    if not QSB.InGroup() then return Print("Join a party first, then share your quests.") end
+    if not QuestLogPushQuest then return Print("This client can't share quests.") end
+    local g = QSB.HereGroup(QSB.ReadLog())
+    if not g then return Print("You have no quests for " .. (currentZone or "this zone") .. ".") end
+    local oldSel = (C_QuestLog and C_QuestLog.GetSelectedQuest and C_QuestLog.GetSelectedQuest())
+        or (GetQuestLogSelection and GetQuestLogSelection())
+    local queue, skipped = {}, 0
+    for _, q in ipairs(g.quests) do
+        if Pushable(q) then queue[#queue + 1] = q else skipped = skipped + 1 end
+    end
+    if #queue == 0 then
+        RestoreSelection(oldSel)
+        return Print("None of your " .. g.zone .. " quests can be shared.")
+    end
+    share = { zone = g.zone, queue = queue, tries = {}, sent = 0, oldSel = oldSel }
+    Print("Sharing " .. #queue .. " quest" .. (#queue == 1 and "" or "s") .. " from " .. g.zone
+        .. (skipped > 0 and (" (" .. skipped .. " can't be shared)") or "") .. "...")
+    QSB.Refresh()
+    ShareStep()
+end
+
+-- "Name is busy." comes back as a system message: try that quest again later
+local busyPattern
+local function OnSystemMessage(msg)
+    if not share or not share.current or type(msg) ~= "string" or IsSecret(msg) then return end
+    if not busyPattern then
+        local fmt = ERR_QUEST_PUSH_BUSY_S or "%s is busy."
+        busyPattern = "^" .. fmt:gsub("([%(%)%.%+%-%*%?%[%]%^%$])", "%%%1"):gsub("%%s", ".+") .. "$"
+    end
+    if msg:find(busyPattern) then
+        local q = share.current
+        if (share.tries[q.questID] or 0) < SHARE_TRIES then
+            share.current = nil
+            share.queue[#share.queue + 1] = q
+        end
+    end
+end
+
+---------------------------------------------------------------------------
 -- Refresh plumbing
 ---------------------------------------------------------------------------
 function QSB.Refresh(groups)
@@ -333,6 +429,8 @@ local function Slash(msg)
         s.minimap = not s.minimap
         QSB.UI.ApplyMinimap()
         Print("Minimap button: " .. OnOff(s.minimap))
+    elseif cmd == "share" then
+        QSB.ShareZone()
     elseif cmd == "min" or cmd == "minimize" then
         QSB.UI.ToggleMinimized()
     elseif cmd == "auto" then
@@ -365,6 +463,7 @@ local function Slash(msg)
         Print("/qsb tracker - hide Blizzard's quest tracker (" .. OnOff(s.hideTracker) .. ")")
         Print("/qsb objectives - show objective lines (" .. OnOff(s.showObjectives) .. ")")
         Print("/qsb settings - open the settings (or click the cog on the window)")
+        Print("/qsb share - share all your quests for this zone with your party")
         Print("/qsb min - minimize/restore   /qsb minimap - minimap button on/off")
         Print("/qsb opacity 70 | lock | scale 0.8 | reset")
         Print("Click a zone to open/close it, Shift-click to pin it open. Click a quest to open it, Shift-click to link, right-click to track.")
@@ -377,7 +476,7 @@ end
 local frame = CreateFrame("Frame")
 QSB.frame = frame
 
-frame:SetScript("OnEvent", function(_, event)
+frame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LOGIN" then
         QuestSidebarDB = QuestSidebarDB or {}
         db = QuestSidebarDB
@@ -387,7 +486,8 @@ frame:SetScript("OnEvent", function(_, event)
         if QSB.UI then QSB.UI.Init(db) end
         for _, ev in ipairs({ "QUEST_LOG_UPDATE", "QUEST_WATCH_LIST_CHANGED", "UNIT_QUEST_LOG_CHANGED", "QUEST_ACCEPTED",
                               "QUEST_REMOVED", "QUEST_TURNED_IN", "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED",
-                              "ZONE_CHANGED_INDOORS", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED" }) do
+                              "ZONE_CHANGED_INDOORS", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED",
+                              "GROUP_ROSTER_UPDATE", "CHAT_MSG_SYSTEM" }) do
             pcall(frame.RegisterEvent, frame, ev)
         end
         SLASH_QUESTSIDEBAR1 = "/qsb"
@@ -396,6 +496,8 @@ frame:SetScript("OnEvent", function(_, event)
     elseif event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED"
         or event == "ZONE_CHANGED_INDOORS" then
         if db then OnZoneChanged() end
+    elseif event == "CHAT_MSG_SYSTEM" then
+        OnSystemMessage(...)
     elseif event == "PLAYER_REGEN_ENABLED" then
         if db then QSB.UI.ApplyTracker(); QSB.QueueRefresh() end
     elseif db then
