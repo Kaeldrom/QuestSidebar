@@ -164,6 +164,70 @@ function QSB.TurnIn(q)
     return text
 end
 
+---------------------------------------------------------------------------
+-- XP for handing a quest in
+---------------------------------------------------------------------------
+-- The reward depends on your level, so the cache is per level. None at max level
+-- (or with XP turned off): the quest pays gold instead.
+local xpCache, xpLevel = {}, nil
+
+local function AtMaxLevel()
+    if IsXPUserDisabled and IsXPUserDisabled() then return true end
+    local me = UnitLevel and UnitLevel("player")
+    local max = (GetMaxLevelForPlayerExpansion and GetMaxLevelForPlayerExpansion())
+        or (GetMaxPlayerLevel and GetMaxPlayerLevel())
+    return type(me) == "number" and type(max) == "number" and max > 0 and me >= max
+end
+QSB.AtMaxLevel = AtMaxLevel
+
+local function ReadXP(q)
+    if not GetQuestLogRewardXP then return nil end
+    local ok, xp = pcall(GetQuestLogRewardXP, q.questID)
+    if ok and type(xp) == "number" and not IsSecret(xp) and xp > 0 then return xp end
+    -- older clients read the quest selected in the log
+    if C_QuestLog and C_QuestLog.SetSelectedQuest then
+        local old = C_QuestLog.GetSelectedQuest and C_QuestLog.GetSelectedQuest()
+        C_QuestLog.SetSelectedQuest(q.questID)
+        ok, xp = pcall(GetQuestLogRewardXP)
+        if old and old ~= 0 then C_QuestLog.SetSelectedQuest(old) end
+    elseif SelectQuestLogEntry and GetQuestLogSelection then
+        local old = GetQuestLogSelection()
+        SelectQuestLogEntry(q.index)
+        ok, xp = pcall(GetQuestLogRewardXP)
+        if old and old > 0 then SelectQuestLogEntry(old) end
+    end
+    if ok and type(xp) == "number" and not IsSecret(xp) and xp > 0 then return xp end
+    return nil
+end
+
+-- XP you'll get for turning the quest in, or nil
+function QSB.RewardXP(q)
+    if not q or not q.questID or q.questID == 0 or AtMaxLevel() then return nil end
+    local lvl = UnitLevel and UnitLevel("player")
+    if lvl ~= xpLevel then wipe(xpCache); xpLevel = lvl end
+    -- a number is kept; "none yet" is retried after 10s (quest data can still
+    -- be loading right after login)
+    local v = xpCache[q.questID]
+    local now = GetTime and GetTime() or 0
+    if type(v) == "number" then return v end
+    if v and now - v.at < 10 then return nil end
+    local xp = ReadXP(q)
+    xpCache[q.questID] = xp or { at = now }
+    return xp
+end
+
+function QSB.FormatXP(n)
+    local s = (BreakUpLargeNumbers and BreakUpLargeNumbers(n)) or tostring(math.floor(n))
+    return s .. " XP"
+end
+
+-- "about 35% of a level" against what this level needs
+function QSB.LevelShare(xp)
+    local need = UnitXPMax and UnitXPMax("player")
+    if type(need) ~= "number" or need <= 0 or IsSecret(need) then return nil end
+    return math.floor(xp / need * 100 + 0.5)
+end
+
 -- { {zone, quests = { {title, level, questID, index, complete, objectives, tracked} }, total, done }, ... }
 function QSB.ReadLog()
     if ExpandBlizzardHeaders() then
@@ -807,7 +871,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
         for _, ev in ipairs({ "QUEST_LOG_UPDATE", "QUEST_WATCH_LIST_CHANGED", "UNIT_QUEST_LOG_CHANGED", "QUEST_ACCEPTED",
                               "QUEST_REMOVED", "QUEST_TURNED_IN", "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED",
                               "ZONE_CHANGED_INDOORS", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED",
-                              "GROUP_ROSTER_UPDATE", "CHAT_MSG_SYSTEM" }) do
+                              "GROUP_ROSTER_UPDATE", "CHAT_MSG_SYSTEM", "PLAYER_LEVEL_UP" }) do
             pcall(frame.RegisterEvent, frame, ev)
         end
         local spf = ShortestPathForever and ShortestPathForever.API

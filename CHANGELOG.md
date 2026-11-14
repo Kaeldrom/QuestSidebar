@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.0 - 2026-11-14
+
+- **XP for each turn-in.** Every finished quest shows the XP you'll get for handing it in, for example **+1,250 XP**, next to "Ready to turn in".
+- The **Ready to turn in** section in Current Zone shows the total XP for that zone.
+- The **Turn in** tab starts with the total for every finished quest and how much of a level that is, for example **Total 4,650 XP (25% of a level)**.
+- The numbers update when you level up. At max level they're hidden, because quests pay gold instead.
+
 ## 1.8.2 - 2026-11-14
 
 - The settings panel has an **X** in its corner to close it, so you no longer need to click the cog again.

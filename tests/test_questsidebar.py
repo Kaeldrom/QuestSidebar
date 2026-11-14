@@ -138,6 +138,8 @@ function UnitName(u) local i = tonumber(u:match("party(%d)")); return i and PART
 C_QuestLog.IsUnitOnQuest = function(u, id) local i = tonumber(u:match("party(%d)")); return PARTY[i].quests[id] == true end
 MYLEVEL = 20
 function UnitLevel() return MYLEVEL end
+NOW = 0
+function GetTime() return NOW end
 MENU = nil
 MenuUtil = { CreateContextMenu = function(owner, gen)
   MENU = { items = {} }
@@ -652,6 +654,49 @@ lua.execute("QuestSidebarSettings.close.scripts.OnClick(QuestSidebarSettings.clo
 check("X closes settings", not lua.eval("QuestSidebarSettings:IsShown()"))
 lua.execute("QuestSidebar.UI.cog.scripts.OnClick(QuestSidebar.UI.cog)")
 check("cog still opens it after", lua.eval("QuestSidebarSettings:IsShown()"))
+
+# ---- 1.9.0: XP on turn-ins ---------------------------------------------------------------------------
+reset_log()
+lua.execute("""for _, e in ipairs(LOG) do if e.questID == 1 then e.isComplete = true end end
+XP = { [2] = 1250, [1] = 3400, [3] = 900 }
+XPCALLS = 0
+function GetQuestLogRewardXP(id) XPCALLS = XPCALLS + 1; return XP[id] or 0 end
+function UnitXPMax() return 18500 end
+function GetMaxPlayerLevel() return 60 end
+function BreakUpLargeNumbers(n) local s = tostring(n); return (s:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")) end
+NOW = NOW + 60; MYLEVEL = 20; ZONE = 'The Barrens'; QuestSidebar.UI.SelectTab('zone')""")
+ev("ZONE_CHANGED_NEW_AREA"); lua.execute("run_timers()")
+p = row("Plainstrider")
+check("XP on the ready line", "+1,250 XP" in p.objectives.text)
+check("no XP shown on unfinished quests", "XP" not in row("Raptor").objectives.text)
+sec = sections()
+check("ready section shows its XP", "1,250 XP" in sec[0])
+
+calls = lua.eval("XPCALLS")
+lua.execute("QuestSidebar.Refresh(); QuestSidebar.Refresh()")
+check("XP is cached", lua.eval("XPCALLS") == calls)
+
+lua.execute("QuestSidebar.UI.SelectTab('turnin')")
+sec = sections()
+check("Turn in tab total", sec and "Total 4,650 XP" in sec[0])
+check("share of a level", "25% of a level" in sec[0])
+check("each turn-in has its XP", "+3,400 XP" in row("Stonetalon").objectives.text)
+
+lua.execute("XP[2] = 1500; MYLEVEL = 21"); ev("PLAYER_LEVEL_UP", 21); lua.execute("run_timers()")
+check("level up refreshes XP", "+1,500 XP" in row("Plainstrider").objectives.text)
+
+lua.execute("MYLEVEL = 60; QuestSidebar.Refresh()")
+check("max level: no XP", "XP" not in row("Plainstrider").objectives.text and not any("Total" in t for t in sections()))
+lua.execute("MYLEVEL = 20; XP = {}; QuestSidebar.Refresh()")
+check("no XP reward: nothing shown", "XP" not in row("Plainstrider").objectives.text)
+lua.execute("MYLEVEL = 22; QuestSidebar.Refresh()")
+check("reward not loaded yet: nothing shown", "XP" not in row("Plainstrider").objectives.text)
+lua.execute("XP = { [2] = 1700 }; NOW = NOW + 2; QuestSidebar.Refresh()")
+check("not asked again straight away", "XP" not in row("Plainstrider").objectives.text)
+lua.execute("NOW = NOW + 11; QuestSidebar.Refresh()")
+check("asked again after 10s and shown", "+1,700 XP" in row("Plainstrider").objectives.text)
+lua.execute("GetQuestLogRewardXP = nil; QuestSidebar.Refresh()")
+check("client without the call: fine", "Ready to turn in" in row("Plainstrider").objectives.text)
 
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

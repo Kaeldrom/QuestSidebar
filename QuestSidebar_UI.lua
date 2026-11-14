@@ -20,6 +20,7 @@ local PARTY = "|cff66ddff"
 local ORANGE = "|cffff9933"
 local CHECK = "|TInterface\\RaidFrame\\ReadyCheck-Ready:13:13|t"
 local SECTION_H = 18
+local XPC = "|cffc8a2ff" -- XP purple, like the XP bar
 local PAD = 6
 
 local GREY = "|cff9a9a9a"
@@ -347,7 +348,8 @@ local function FillQuest(r, q, width, showDetails)
     if not folded then
         local parts = {}
         if q.complete then
-            parts[#parts + 1] = GREEN .. CHECK .. " Ready to turn in|r"
+            local xp = QSB.RewardXP(q)
+            parts[#parts + 1] = GREEN .. CHECK .. " Ready to turn in|r" .. (xp and ("  " .. XPC .. "+" .. QSB.FormatXP(xp) .. "|r") or "")
         elseif q.failed then
             parts[#parts + 1] = RED .. "- Failed|r"
         elseif db.settings.showObjectives then
@@ -506,7 +508,10 @@ function UI.Draw(groups)
                 if q.complete then ready[#ready + 1] = q else rest[#rest + 1] = q end
             end
             if #ready > 0 then
-                Section(CHECK .. " |cffffd100Ready to turn in|r  " .. GREEN .. #ready .. "|r", true)
+                local xpSum = 0
+                for _, q in ipairs(ready) do xpSum = xpSum + (QSB.RewardXP(q) or 0) end
+                Section(CHECK .. " |cffffd100Ready to turn in|r  " .. GREEN .. #ready .. "|r"
+                    .. (xpSum > 0 and ("   " .. XPC .. QSB.FormatXP(xpSum) .. "|r") or ""), true)
                 for _, q in ipairs(ready) do Quest(q, true) end
                 if #rest > 0 then Section("|cffd8d0bcIn progress|r  " .. GREY .. #rest .. "|r", false) end
             end
@@ -534,6 +539,17 @@ function UI.Draw(groups)
                 local entry = { zone = g.zone, quests = ready, done = #ready }
                 if g.zone == here then table.insert(list, 1, entry) else list[#list + 1] = entry end
             end
+        end
+        -- what handing everything in is worth
+        local xpSum = 0
+        for _, g in ipairs(list) do
+            for _, q in ipairs(g.quests) do xpSum = xpSum + (QSB.RewardXP(q) or 0) end
+        end
+        UI.turnInXP = xpSum
+        if xpSum > 0 then
+            local share = QSB.LevelShare(xpSum)
+            Section(XPC .. "Total " .. QSB.FormatXP(xpSum) .. "|r"
+                .. (share and (GREY .. "  (" .. share .. "% of a level)|r") or ""), false)
         end
         for _, g in ipairs(list) do
             Header(g, true)
