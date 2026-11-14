@@ -78,7 +78,11 @@ end
 function UI.MenuItems(q)
     local items = {}
     local function Add(text, func, disabled) items[#items + 1] = { text = text, func = func, disabled = disabled } end
-    Add(QSB.HasRouter() and "|cffffd100Fastest route there|r" or "Point me there (quest arrow)", function() QSB.RouteTo(q) end)
+    if QSB.IsRouted(q) then
+        Add("|cffffd100Stop the route|r", function() QSB.RouteTo(q) end)
+    else
+        Add(QSB.HasRouter() and "|cffffd100Fastest route there|r" or "Point me there (quest arrow)", function() QSB.RouteTo(q) end)
+    end
     Add(q.tracked and "Stop tracking" or "Track", function() QSB.ToggleTrack(q) end)
     local canShare = QSB.CanPush(q)
     Add(canShare and "Share with party" or (QSB.InGroup() and "Can't be shared" or "Share with party (not in a party)"),
@@ -250,10 +254,21 @@ local function NewQuest()
     r.route.icon:SetTexture(ICON_ROUTE)
     r.route.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     r.route:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    -- gold glow while this quest is being routed to
+    r.route.on = r.route:CreateTexture(nil, "OVERLAY")
+    r.route.on:SetPoint("TOPLEFT", -3, 3)
+    r.route.on:SetPoint("BOTTOMRIGHT", 3, -3)
+    r.route.on:SetTexture("Interface\\Buttons\\CheckButtonHilight")
+    r.route.on:SetBlendMode("ADD")
+    r.route.on:SetVertexColor(1, 0.82, 0)
+    r.route.on:Hide()
     r.route:SetScript("OnClick", function(self) QSB.RouteTo(self:GetParent().quest) end)
     r.route:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        if QSB.HasRouter() then
+        if QSB.IsRouted(self:GetParent().quest) then
+            GameTooltip:AddLine("Stop the route")
+            GameTooltip:AddLine("Click again to stop being guided to this quest.", 0.8, 0.8, 0.8, true)
+        elseif QSB.HasRouter() then
             GameTooltip:AddLine("Fastest route there")
             GameTooltip:AddLine("Plans the quickest way: walking, flight paths, boats, zeppelins and portals (Shortest Path Forever).", 0.8, 0.8, 0.8, true)
         else
@@ -283,7 +298,7 @@ local function NewQuest()
             if #q.party.have > 0 then GameTooltip:AddLine("Party on this quest: " .. table.concat(q.party.have, ", "), 0.4, 0.87, 1, true) end
             if #q.party.missing > 0 then GameTooltip:AddLine("Doesn't have it: " .. table.concat(q.party.missing, ", "), 0.6, 0.6, 0.6, true) end
         end
-        GameTooltip:AddLine("Click: show/hide objectives   Ctrl-click: fastest route   Shift-click: link in chat   Right-click: menu", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Click: show/hide objectives   Ctrl-click: fastest route (again to stop)   Shift-click: link in chat   Right-click: menu", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -313,6 +328,8 @@ local function FillQuest(r, q, width, showDetails)
     r.title:SetWidth(width - 30 - 64 - tagW)
     r.title:SetText(LevelColor(q.level) .. "[" .. (q.level or "?") .. "] " .. q.title .. "|r")
     r.track:SetChecked(q.tracked)
+    if QSB.IsRouted(q) then r.route.on:Show(); r.route.icon:SetDesaturated(false); r.route:SetAlpha(1)
+    else r.route.on:Hide(); r.route:SetAlpha(0.8) end
     -- finished: stronger wash + gold edge in Current Zone, a lighter wash in All
     if q.complete then
         r.ready:SetColorTexture(1, 0.82, 0, showDetails and 0.16 or 0.08)

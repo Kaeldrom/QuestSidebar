@@ -2,7 +2,7 @@
 ## Title: |cff66ddffQuest Sidebar|r
 ## Notes: Your whole quest log down the side of the screen, grouped by zone. The zone you're in opens by itself.
 ## Author: Kaeldrom
-## Version: 1.8.0
+## Version: 1.8.1
 ## SavedVariablesPerCharacter: QuestSidebarDB
 ## OptionalDeps: ShortestPathForever
 ## AddonCompartmentFunc: QuestSidebar_Toggle

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.1 - 2026-11-14
+
+- **Fixed:** finished quests weren't recognised in the game, so the **Turn in** tab was empty and the **Ready to turn in** section never appeared. The game no longer reports "finished" in the quest log entry, so the addon now asks each quest directly, the same way Questie and Shortest Path Forever do. Failed quests are detected the same way.
+- **The fastest-route button is now an on/off switch.** Click it again (or Ctrl-click the quest again, or choose **Stop the route** in the right-click menu) to stop the journey and clear the arrow. If routing was what started tracking the quest, it is untracked again. While a route is running, its button glows gold.
+
 ## 1.8.0 - 2026-11-14
 
 - New **Turn in** tab. It lists every finished quest from every zone, grouped by zone, with the zone you're in at the top.

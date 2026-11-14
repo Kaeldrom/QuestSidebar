@@ -103,7 +103,10 @@ SELECTED = 99
 C_QuestLog = {
   GetNumQuestLogEntries = function() return #visible() end,
   GetInfo = function(i) local e = visible()[i]; if not e then return nil end
-    return { title = e.title, level = e.level, isHeader = e.isHeader, isCollapsed = e.isCollapsed, isComplete = e.isComplete, questID = e.questID or 0 } end,
+    -- like the real modern client: no isComplete here, ask IsComplete/IsFailed
+    return { title = e.title, level = e.level, isHeader = e.isHeader, isCollapsed = e.isCollapsed, questID = e.questID or 0 } end,
+  IsComplete = function(id) for _, e in ipairs(LOG) do if e.questID == id then return e.isComplete == true end end return false end,
+  IsFailed = function(id) for _, e in ipairs(LOG) do if e.questID == id then return e.isComplete == -1 end end return false end,
   GetQuestObjectives = function(id) for _, e in ipairs(LOG) do if e.questID == id then return e.obj end end end,
   GetQuestWatchType = function(id) return WATCHED[id] and 0 or nil end,
   AddQuestWatch = function(id) WATCHED[id] = true end,
@@ -599,6 +602,48 @@ lua.execute("SlashCmdList.QUESTSIDEBAR('min')")
 check("minimize hides the new tab", lua.eval("QuestSidebar.UI.tabTurnIn.shown") is False)
 lua.execute("SlashCmdList.QUESTSIDEBAR('min')")
 check("restore shows it", lua.eval("QuestSidebar.UI.tabTurnIn.shown") is True)
+
+# ---- 1.8.1: route button toggles; finished quests read from IsComplete --------------------------------
+check("finished state comes from C_QuestLog.IsComplete", lua.eval("C_QuestLog.GetInfo(2).isComplete") is None)
+reset_log()
+lua.execute("QuestSidebar.StopRoute(true)")  # an earlier test left a route running
+lua.execute("""SUPER = nil; ROUTES = 0; CLEARS = 0; WATCHED = {}
+ShortestPathForeverClearJourneyButton = CreateFrame('Button')
+ShortestPathForeverClearJourneyButton.Click = function() CLEARS = CLEARS + 1 end
+C_SuperTrack.GetSuperTrackedQuestID = function() return SUPER or 0 end
+SPF_ACTIVE = true
+ShortestPathForever = { API = { Active = function() return SPF_ACTIVE end } }
+ZONE = 'The Barrens'; QuestSidebar.UI.SelectTab('turnin')""")
+ev("ZONE_CHANGED_NEW_AREA"); lua.execute("run_timers()")
+check("Turn in tab lists the finished quest", qtitles() and "Plainstrider" in qtitles()[0])
+
+lua.execute("QuestSidebar.UI.SelectTab('zone'); run_timers()")
+def raptor_route(): lua.execute("local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Raptor') then r = q end end; r.route.scripts.OnClick(r.route)"); lua.execute("run_timers()")
+raptor_route()
+check("first click routes", lua.eval("ROUTES") == 1 and lua.eval("SUPER") == 3 and lua.eval("WATCHED[3]") is True)
+check("route button glows", row("Raptor").route.on.shown and not row("Kolkar").route.on.shown)
+lua.execute("local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Raptor') then r = q end end; r.scripts.OnClick(r, 'RightButton')")
+check("menu offers stop", "Stop the route" in lua.eval("MENU.items[1].text"))
+raptor_route()
+check("second click stops", lua.eval("ROUTES") == 1 and lua.eval("CLEARS") == 1 and "Stopped the route" in last_print())
+check("stop clears the arrow", lua.eval("SUPER") == 0)
+check("stop untracks what routing tracked", lua.eval("WATCHED[3]") is None)
+check("glow off", not row("Raptor").route.on.shown)
+
+lua.execute("WATCHED = { [3] = true }; QuestSidebar.Refresh()")
+raptor_route(); raptor_route()
+check("already-tracked quest stays tracked after stop", lua.eval("WATCHED[3]") is True)
+
+raptor_route()
+lua.execute("SPF_ACTIVE = false; QuestSidebar.Refresh()")
+check("journey ended by itself: glow off", not row("Raptor").route.on.shown)
+n = lua.eval("ROUTES")
+raptor_route()
+check("then a click routes again", lua.eval("ROUTES") == n + 1)
+lua.execute("SPF_ACTIVE = true")
+n = lua.eval("ROUTES")
+lua.execute("local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Kolkar') then r = q end end; r.route.scripts.OnClick(r.route); run_timers()")
+check("routing another quest switches", lua.eval("ROUTES") == n + 1 and lua.eval("SUPER") == 5 and row("Kolkar").route.on.shown and not row("Raptor").route.on.shown)
 
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

@@ -44,8 +44,20 @@ local function Entry(i)
     if C_QuestLog and C_QuestLog.GetInfo then
         local e = C_QuestLog.GetInfo(i)
         if not e then return nil end
+        -- Modern clients (Forever included) leave isComplete out of GetInfo: ask
+        -- the quest itself, as Questie and Shortest Path do. 1 = done, -1 = failed.
+        local complete = e.isComplete
+        if not e.isHeader and e.questID and e.questID > 0 then
+            if C_QuestLog.IsFailed and C_QuestLog.IsFailed(e.questID) == true then
+                complete = -1
+            elseif C_QuestLog.IsComplete and C_QuestLog.IsComplete(e.questID) == true then
+                complete = 1
+            elseif C_QuestLog.ReadyForTurnIn and C_QuestLog.ReadyForTurnIn(e.questID) == true then
+                complete = 1
+            end
+        end
         return { title = e.title, level = e.level, isHeader = e.isHeader, isCollapsed = e.isCollapsed,
-                 isComplete = e.isComplete, questID = e.questID, isHidden = e.isHidden, suggestedGroup = e.suggestedGroup,
+                 isComplete = complete, questID = e.questID, isHidden = e.isHidden, suggestedGroup = e.suggestedGroup,
                  index = i }
     end
     local title, level, _, isHeader, isCollapsed, isComplete, _, questID = GetQuestLogTitle(i)
@@ -318,21 +330,75 @@ local function SuperTrack(questID)
     return false
 end
 
+local SPF_CLEAR = "ShortestPathForeverClearJourneyButton"
+local routed -- { questID, title, addedWatch, spf }
+
+local function SPFActive()
+    local api = ShortestPathForever and ShortestPathForever.API
+    if api and api.Active then
+        local ok, active = pcall(api.Active)
+        if ok then return active == true end
+    end
+    return true -- can't tell: trust what we started
+end
+
+-- Is this quest the one we're routing to right now?
+function QSB.IsRouted(q)
+    if not routed or not q or routed.questID ~= q.questID then return false end
+    if routed.spf and not SPFActive() then
+        routed = nil -- the journey ended on its own (you arrived, or cancelled it elsewhere)
+        return false
+    end
+    return true
+end
+
+function QSB.StopRoute(quiet)
+    if not routed then return false end
+    local r = routed
+    routed = nil
+    if r.spf then
+        local clear = _G[SPF_CLEAR]
+        if type(clear) == "table" and clear.Click then clear:Click("LeftButton") end
+    end
+    if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID and C_SuperTrack.SetSuperTrackedQuestID
+        and C_SuperTrack.GetSuperTrackedQuestID() == r.questID then
+        C_SuperTrack.SetSuperTrackedQuestID(0)
+    end
+    -- we tracked it to route there, so untrack it again
+    if r.addedWatch and QSB.IsTracked(r.questID) then
+        if C_QuestLog and C_QuestLog.RemoveQuestWatch then C_QuestLog.RemoveQuestWatch(r.questID) end
+    end
+    if not quiet then Print("Stopped the route to " .. r.title .. ".") end
+    QSB.QueueRefresh()
+    return true
+end
+
+-- Click once to route there, click again to stop.
 function QSB.RouteTo(q)
     if not q or not q.questID or q.questID == 0 then return nil end
+    if QSB.IsRouted(q) then
+        QSB.StopRoute()
+        return "stopped"
+    end
     if InCombatLockdown and InCombatLockdown() then
         Print("Routes can't be planned in combat. Try again once it's over.")
         return nil
     end
+    if routed then QSB.StopRoute(true) end -- switching to another quest
+    local addedWatch = not q.tracked
     if QSB.HasRouter() then
         SuperTrack(q.questID)
-        if not q.tracked then QSB.ToggleTrack(q) end -- so it shows in the tracker too
+        if addedWatch then QSB.ToggleTrack(q) end -- so it shows in the tracker too
         _G[SPF_BUTTON]:Click("LeftButton")
+        routed = { questID = q.questID, title = q.title, addedWatch = addedWatch, spf = true }
+        QSB.QueueRefresh()
         return "route"
     end
     if SuperTrack(q.questID) then
-        if not q.tracked then QSB.ToggleTrack(q) end
+        if addedWatch then QSB.ToggleTrack(q) end
+        routed = { questID = q.questID, title = q.title, addedWatch = addedWatch, spf = false }
         Print("Following " .. q.title .. " with the game's quest arrow. Install Shortest Path Forever for full routes with flight paths, boats and portals.")
+        QSB.QueueRefresh()
         return "arrow"
     end
     Print("No way to point you to that quest on this client. Shortest Path Forever adds full routes.")
@@ -744,6 +810,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
                               "GROUP_ROSTER_UPDATE", "CHAT_MSG_SYSTEM" }) do
             pcall(frame.RegisterEvent, frame, ev)
         end
+        local spf = ShortestPathForever and ShortestPathForever.API
+        if spf and spf.Subscribe then pcall(spf.Subscribe, function() QSB.QueueRefresh() end) end
         SLASH_QUESTSIDEBAR1 = "/qsb"
         SLASH_QUESTSIDEBAR2 = "/questsidebar"
         SlashCmdList.QUESTSIDEBAR = Slash
