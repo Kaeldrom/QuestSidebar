@@ -54,11 +54,21 @@ function Widget:SetTexture(t) self.texture = t end
 function Widget:Disable() self.disabled = true end
 function Widget:Enable() self.disabled = false end
 function Widget:GetParent() return self.parent end
-function CreateFrame(kind, name, parent)
+function Widget:SetNormalTexture(t) self.normal = t end
+function Widget:GetCenter() return 0, 0 end
+function Widget:GetEffectiveScale() return 1 end
+function CreateFrame(kind, name, parent, template)
   local f = setmetatable({ scripts = {}, events = {}, kind = kind, parent = parent }, Widget)
   if name then _G[name] = f end
+  if template == "BasicFrameTemplateWithInset" then
+    f.CloseButton = setmetatable({ scripts = {}, events = {}, kind = "Button", shown = true }, Widget)
+    f.Inset = setmetatable({ scripts = {}, events = {}, kind = "Frame", shown = true }, Widget)
+  end
   return f
 end
+Minimap = CreateFrame("Frame"); Minimap.w = 140
+CURSOR = { 0, 100 }
+function GetCursorPosition() return CURSOR[1], CURSOR[2] end
 UIParent = CreateFrame("Frame"); GameTooltip = CreateFrame("GameTooltip"); tinsert = table.insert; UISpecialFrames = {}
 ObjectiveTrackerFrame = CreateFrame("Frame"); ObjectiveTrackerFrame.shown = true
 function InCombatLockdown() return COMBAT end
@@ -275,6 +285,45 @@ lua.execute("QuestSidebar.UI.ToggleSettings()")
 check("cog closes settings", not lua.eval("QuestSidebarSettings:IsShown()"))
 lua.execute("SlashCmdList.QUESTSIDEBAR('settings')")
 check("/qsb settings opens", lua.eval("QuestSidebarSettings:IsShown()"))
+
+# ---- minimize instead of X ---------------------------------------------------
+lua.execute("QuestSidebarSettings:Hide(); QuestSidebarFrame:Show(); QuestSidebar.UI.SelectTab('all')")
+check("X hidden", lua.eval("QuestSidebarFrame.CloseButton:IsShown()") is False)
+lua.execute("QuestSidebarFrame.CloseButton:Show()")
+check("X stays hidden", lua.eval("QuestSidebarFrame.CloseButton:IsShown()") is False)
+check("minimize button styled", "SmallerButton" in (lua.eval("QuestSidebar.UI.minBtn.normal") or ""))
+size_before = (lua.eval("QuestSidebarDB.size[1]"), lua.eval("QuestSidebarDB.size[2]")) if lua.eval("QuestSidebarDB.size") else None
+lua.execute("QuestSidebar.UI.minBtn.scripts.OnClick(QuestSidebar.UI.minBtn)")
+check("minimized: title bar only", lua.eval("QuestSidebarFrame.h") == 30 and lua.eval("QuestSidebarDB.minimized") is True)
+check("minimized: list + tabs hidden", not lua.eval("QuestSidebarFrame") is None and lua.eval("QuestSidebarFrame.Inset.shown") is False)
+check("restore button styled", "BiggerButton" in lua.eval("QuestSidebar.UI.minBtn.normal"))
+lua.execute("QuestSidebarFrame.scripts.OnSizeChanged(QuestSidebarFrame, 300, 30)")
+size_now = (lua.eval("QuestSidebarDB.size[1]"), lua.eval("QuestSidebarDB.size[2]")) if lua.eval("QuestSidebarDB.size") else None
+check("minimizing doesn't overwrite chosen size", size_now == size_before)
+lua.execute("QuestSidebar.Refresh()")
+check("minimized: no rows drawn", lua.eval("QuestSidebarFrame.h") == 30)
+lua.execute("QuestSidebar.UI.minBtn.scripts.OnClick(QuestSidebar.UI.minBtn)")
+check("restored to chosen height", lua.eval("QuestSidebarDB.minimized") is None and lua.eval("QuestSidebarFrame.h") == (size_before[1] if size_before else 460) and lua.eval("QuestSidebarFrame.Inset.shown") is True)
+lua.execute("SlashCmdList.QUESTSIDEBAR('min')")
+check("/qsb min", lua.eval("QuestSidebarDB.minimized") is True)
+lua.execute("SlashCmdList.QUESTSIDEBAR('reset')")
+check("reset un-minimizes", lua.eval("QuestSidebarDB.minimized") is None and lua.eval("QuestSidebarFrame.h") == 460)
+
+# ---- minimap button -------------------------------------------------------------
+mb = "QuestSidebarMinimapButton"
+check("minimap button exists + shown", lua.eval(mb + " ~= nil") and lua.eval(mb + ":IsShown()"))
+lua.execute(mb + ".scripts.OnClick(" + mb + ", 'LeftButton')")
+check("click hides sidebar", not lua.eval("QuestSidebarFrame:IsShown()") and lua.eval("ObjectiveTrackerFrame:IsShown()"))
+lua.execute(mb + ".scripts.OnClick(" + mb + ", 'LeftButton')")
+check("click shows sidebar", lua.eval("QuestSidebarFrame:IsShown()"))
+lua.execute("QuestSidebarSettings:Hide(); " + mb + ".scripts.OnClick(" + mb + ", 'RightButton')")
+check("right-click opens settings", lua.eval("QuestSidebarSettings:IsShown()"))
+lua.execute(mb + ".scripts.OnDragStart(" + mb + "); " + mb + ".scripts.OnUpdate(); " + mb + ".scripts.OnDragStop(" + mb + ")")
+check("drag saves angle (cursor straight up = 90)", abs(lua.eval("QuestSidebarDB.minimapAngle") - 90) < 1e-6)
+lua.execute("local c = QuestSidebarSettings.items[7]; c:SetChecked(false); c.scripts.OnClick(c)")
+check("settings checkbox hides minimap button", not lua.eval(mb + ":IsShown()") and lua.eval("QuestSidebarDB.settings.minimap") is False)
+lua.execute("SlashCmdList.QUESTSIDEBAR('minimap')")
+check("/qsb minimap brings it back", lua.eval(mb + ":IsShown()"))
 
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

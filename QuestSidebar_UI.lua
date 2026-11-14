@@ -266,6 +266,7 @@ function UI.Draw(groups)
     local total = 0
     for _, g in ipairs(groups) do total = total + #g.quests end
     if UI.SetTitle then UI.SetTitle("Quests  " .. GREY .. total .. "/25|r") end
+    if db.minimized then return end
 
     local function Header(g, open)
         nh = nh + 1
@@ -401,9 +402,10 @@ end
 
 function UI.ResetPosition()
     if not panel then return end
-    db.point, db.size = nil, nil
+    db.point, db.size, db.minimized = nil, nil, nil
     panel:SetSize(DEFAULT_W, DEFAULT_H)
     ApplyPosition()
+    if UI.minBtn then UI.ApplyMinimized() end
 end
 
 function UI.ApplyScale()
@@ -490,7 +492,7 @@ end
 
 local function BuildSettings()
     settings = CreateFrame("Frame", "QuestSidebarSettings", panel, "BackdropTemplate")
-    settings:SetSize(220, 252)
+    settings:SetSize(220, 276)
     settings:SetPoint("TOPRIGHT", panel, "TOPLEFT", -2, 0)
     settings:SetFrameStrata("HIGH")
     settings:EnableMouse(true)
@@ -518,6 +520,7 @@ local function BuildSettings()
     items[#items + 1] = Check(settings, "Show objectives", "showObjectives")
     items[#items + 1] = Check(settings, "Hide Blizzard's tracker", "hideTracker", function() UI.ApplyTracker(true) end)
     items[#items + 1] = Check(settings, "Lock position", "locked")
+    items[#items + 1] = Check(settings, "Minimap button", "minimap", function() UI.ApplyMinimap() end)
 
     local y = -32
     for _, it in ipairs(items) do
@@ -544,6 +547,128 @@ function UI.Settings() return settings end -- tests
 
 function UI.ToggleShown()
     if panel:IsShown() then panel:Hide() else panel:Show() end
+end
+
+---------------------------------------------------------------------------
+-- Minimize: shrink to the title bar and back
+---------------------------------------------------------------------------
+local SHRUNK_H = 30
+
+local function HasAtlas(name)
+    return C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(name) ~= nil
+end
+
+local function StyleMinButton(b, minimized)
+    -- modern clients: the red square buttons; older: the world map's smaller/bigger buttons
+    local up = minimized and "RedButton-Expand" or "RedButton-Condense"
+    if HasAtlas(up) and b.SetNormalAtlas then
+        b:SetNormalAtlas(up)
+        b:SetPushedAtlas(up .. "-Pressed")
+        if HasAtlas("RedButton-Highlight") then b:SetHighlightAtlas("RedButton-Highlight", "ADD") end
+    else
+        local base = minimized and "Interface\\Buttons\\UI-Panel-BiggerButton" or "Interface\\Buttons\\UI-Panel-SmallerButton"
+        b:SetNormalTexture(base .. "-Up")
+        b:SetPushedTexture(base .. "-Down")
+        b:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight", "ADD")
+    end
+end
+
+function UI.ApplyMinimized()
+    if not panel then return end
+    local m = db.minimized and true or false
+    for _, f in ipairs({ tabZone, tabAll, scroll, UI.grip }) do
+        if f then if m then f:Hide() else f:Show() end end
+    end
+    if type(panel.Inset) == "table" and panel.Inset.Hide then
+        if m then panel.Inset:Hide() else panel.Inset:Show() end
+    end
+    if m and UI.bar then UI.bar:Hide() end
+    local size = db.size or { DEFAULT_W, DEFAULT_H }
+    panel:SetHeight(m and SHRUNK_H or size[2])
+    if UI.minBtn then StyleMinButton(UI.minBtn, m) end
+    if not m then QSB.Refresh() end
+end
+
+function UI.ToggleMinimized()
+    db.minimized = not db.minimized or nil
+    UI.ApplyMinimized()
+end
+
+---------------------------------------------------------------------------
+-- Minimap button: left-click shows/hides, right-click settings, drag to move
+---------------------------------------------------------------------------
+local mapBtn
+
+local function PlaceMinimap()
+    local angle = math.rad(db.minimapAngle or 200)
+    local radius = (Minimap:GetWidth() / 2) + 5
+    mapBtn:ClearAllPoints()
+    mapBtn:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * radius, math.sin(angle) * radius)
+end
+
+function UI.BuildMinimap()
+    if mapBtn or not Minimap then return end
+    local b = CreateFrame("Button", "QuestSidebarMinimapButton", Minimap)
+    b:SetSize(31, 31)
+    b:SetFrameStrata("MEDIUM")
+    b:SetFrameLevel(8)
+    b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    b:RegisterForDrag("LeftButton")
+    b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+    local bg = b:CreateTexture(nil, "BACKGROUND")
+    bg:SetSize(20, 20)
+    bg:SetPoint("TOPLEFT", 7, -5)
+    bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+    local icon = b:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(18, 18)
+    icon:SetPoint("TOPLEFT", 7, -6)
+    icon:SetTexture("Interface\\Icons\\INV_Misc_Note_01")
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    b.icon = icon
+    local border = b:CreateTexture(nil, "OVERLAY")
+    border:SetSize(53, 53)
+    border:SetPoint("TOPLEFT")
+    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+
+    b:SetScript("OnMouseDown", function() icon:SetPoint("TOPLEFT", 8, -7) end)
+    b:SetScript("OnMouseUp", function() icon:SetPoint("TOPLEFT", 7, -6) end)
+    b:SetScript("OnClick", function(_, button)
+        if button == "RightButton" then
+            if not panel:IsShown() then panel:Show() end
+            UI.ToggleSettings()
+        else
+            UI.ToggleShown()
+        end
+    end)
+    b:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("Quest Sidebar", 0.4, 0.87, 1)
+        GameTooltip:AddLine("Click: show or hide", 1, 1, 1)
+        GameTooltip:AddLine("Right-click: settings", 1, 1, 1)
+        GameTooltip:AddLine("Drag: move this button", 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:SetScript("OnDragStart", function(self)
+        GameTooltip:Hide()
+        self:SetScript("OnUpdate", function()
+            local mx, my = Minimap:GetCenter()
+            local cx, cy = GetCursorPosition()
+            local scale = Minimap:GetEffectiveScale()
+            db.minimapAngle = math.deg(math.atan2(cy / scale - my, cx / scale - mx))
+            PlaceMinimap()
+        end)
+    end)
+    b:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
+    mapBtn = b
+    UI.mapBtn = b
+    PlaceMinimap()
+    UI.ApplyMinimap()
+end
+
+function UI.ApplyMinimap()
+    if not mapBtn then return end
+    if db.settings.minimap then mapBtn:Show() else mapBtn:Hide() end
 end
 
 function UI.Init(savedDB)
@@ -628,6 +753,7 @@ function UI.Init(savedDB)
 
     -- resize grip
     local grip = CreateFrame("Button", nil, panel)
+    UI.grip = grip
     grip:SetSize(16, 16)
     grip:SetPoint("BOTTOMRIGHT", -4, 4)
     grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
@@ -649,6 +775,7 @@ function UI.Init(savedDB)
 
     local sizing = false
     panel:SetScript("OnSizeChanged", function(self, w, h)
+        if db.minimized then return end -- the shrunk height isn't the size you chose
         db.size = { math.floor(w + 0.5), math.floor(h + 0.5) }
         if sizing then return end
         sizing = true
@@ -695,6 +822,29 @@ function UI.Init(savedDB)
     end)
     cog:SetScript("OnClick", function() UI.ToggleSettings() end)
     UI.cog = cog
+
+    -- minimize, where the close X used to be
+    local closeBtn = (type(panel.CloseButton) == "table" and panel.CloseButton) or _G["QuestSidebarFrameCloseButton"]
+    local minBtn = CreateFrame("Button", nil, panel)
+    minBtn:SetSize(24, 24)
+    if closeBtn and closeBtn.Hide then
+        minBtn:SetPoint("CENTER", closeBtn, "CENTER")
+        closeBtn:Hide()
+        closeBtn:SetScript("OnShow", closeBtn.Hide)
+    else
+        minBtn:SetPoint("TOPRIGHT", 2, 1)
+    end
+    minBtn:SetScript("OnClick", function() UI.ToggleMinimized() end)
+    minBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine(db.minimized and "Restore" or "Minimize")
+        GameTooltip:Show()
+    end)
+    minBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    UI.minBtn = minBtn
+
+    UI.BuildMinimap()
+    UI.ApplyMinimized()
 
     UI.ApplyOpacity()
     tabZone:Disable()

@@ -8,7 +8,7 @@ Your whole quest log down the side of the screen, where the quest tracker normal
 - **Click a quest** to show or hide its objectives, **Shift-click** to link it, and **right-click** or use the checkbox to track it. The ▶ button opens it in the quest log.
 - **Resize** with the grip in the bottom-right corner, **drag** to move, and scroll with the mouse wheel or the scroll bar. Size and position are remembered, and opening zones never makes the window grow or jump.
 
-Click the small **cog** in the title bar for settings: opacity, size, and the options below.
+The **minimize** button in the top corner shrinks it to its title bar. The **minimap button** shows or hides it (right-click for settings, drag to move). Click the small **cog** in the title bar for settings: opacity, size, and the options below.
 
 By default it hides Blizzard's quest tracker so the two don't overlap (`/qsb tracker` to change that). Zone headers come from your quest log, so class, profession and dungeon quests get their own groups too.
 
@@ -16,7 +16,9 @@ By default it hides Blizzard's quest tracker so the two don't overlap (`/qsb tra
 
 | Command | What it does |
 |---|---|
-| `/qsb` | Show/hide the sidebar |
+| `/qsb` | Show/hide the sidebar (or click the minimap button) |
+| `/qsb min` | Minimize to the title bar / restore |
+| `/qsb minimap` | Minimap button on/off |
 | `/qsb settings` | Open the settings (same as the cog in the title bar) |
 | `/qsb opacity 70` | Background opacity, 10 to 100 |
 | `/qsb auto` | Open the zone you're in automatically on/off |

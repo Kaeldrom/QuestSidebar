@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 - 2026-11-14
+
+- The close X is replaced by a **minimize** button. It shrinks the window to its title bar, and clicking again restores it to the size you chose. `/qsb min` does the same.
+- **Minimap button:** click to show or hide the sidebar, right-click for settings, drag to move it around the minimap. You can turn it off in settings or with `/qsb minimap`.
+- Reset size & position also restores a minimized window.
+
 ## 1.2.0 - 2026-11-14
 
 - Settings panel: click the small cog in the title bar (or `/qsb settings`). It has an **Opacity** slider, a **Size** slider, and checkboxes for opening the zone you're in, showing objectives, hiding Blizzard's tracker, and locking the position.
