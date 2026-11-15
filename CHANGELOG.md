@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.0 - 2026-11-15
+
+- **Finished quests have moved to the Turn in tab.** Current Zone now lists only the quests you still need to do. A gold line at the top, such as "2 ready to turn in  4,650 XP - open Turn in", tells you how many are waiting and what they're worth. Click it to jump to the Turn in tab. When everything in a zone is finished, it says "Nothing left to do in <zone>."
+
 ## 1.11.0 - 2026-11-15
 
 - **Quest item buttons.** A quest that needs you to use an item now has a button for it just outside the sidebar, level with the quest. Click it to use the item; it shows charges and its cooldown. It works in combat too; if the list moves mid-fight, the buttons line up again when combat ends. It uses the game's own quest item, or, for older quests that don't flag one, the item the quest gave you (from Questie's data) if it's in your bags. Turn it off with **Quest item buttons** in settings.

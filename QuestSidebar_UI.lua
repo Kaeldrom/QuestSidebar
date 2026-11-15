@@ -537,10 +537,31 @@ function UI.Draw(groups)
     if share then share:Hide() end
     local search = UI.search
     if search then search:Hide() end
+    -- Current Zone: a line pointing at the Turn in tab, where finished quests live
+    local readyLink = UI.readyLink
+    if readyLink then readyLink:Hide() end
+    local function ReadyLink()
+        if not readyLink or (UI.readyCount or 0) == 0 then return end
+        local xpSum = 0
+        for _, gg in ipairs(groups) do
+            for _, q in ipairs(gg.quests) do if q.complete then xpSum = xpSum + (QSB.RewardXP(q) or 0) end end
+        end
+        readyLink:ClearAllPoints()
+        readyLink:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
+        readyLink:SetWidth(width)
+        readyLink.text:SetText(CHECK .. " |cffffd100" .. UI.readyCount .. " ready to turn in|r"
+            .. (xpSum > 0 and ("  " .. XPC .. QSB.FormatXP(xpSum) .. "|r") or "") .. GREY .. "  - open Turn in|r")
+        readyLink:Show()
+        y = y + SECTION_H + 6
+    end
+
     if UI.tab == "zone" then
         local g = QSB.HereGroup(groups)
+        -- finished quests are in the Turn in tab, not here
+        local rest = {}
+        for _, q in ipairs(g and g.quests or {}) do if not q.complete then rest[#rest + 1] = q end end
         if g then
-            Header(g, true)
+            Header({ zone = g.zone, quests = rest, done = 0 }, true)
             if share then
                 share:ClearAllPoints()
                 share:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
@@ -555,31 +576,26 @@ function UI.Draw(groups)
                 share:Show()
                 y = y + SHARE_H + 4
             end
-            local shown = Visible(g.quests)
-            -- finished quests get their own section at the top
-            local ready, rest = {}, {}
-            for _, q in ipairs(shown) do
-                if q.complete then ready[#ready + 1] = q else rest[#rest + 1] = q end
-            end
-            if #ready > 0 then
-                local xpSum = 0
-                for _, q in ipairs(ready) do xpSum = xpSum + (QSB.RewardXP(q) or 0) end
-                Section(CHECK .. " |cffffd100Ready to turn in|r  " .. GREEN .. #ready .. "|r"
-                    .. (xpSum > 0 and ("   " .. XPC .. QSB.FormatXP(xpSum) .. "|r") or ""), true)
-                for _, q in ipairs(ready) do Quest(q, true) end
-                if #rest > 0 then Section("|cffd8d0bcIn progress|r  " .. GREY .. #rest .. "|r", false) end
-            end
-            for _, q in ipairs(rest) do Quest(q, true) end
-            if #shown < #g.quests then
+            ReadyLink()
+            local shown = Visible(rest)
+            for _, q in ipairs(shown) do Quest(q, true) end
+            if #shown < #rest then
                 empty:ClearAllPoints()
                 empty:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -y - 4)
-                empty:SetText(GREY .. (#g.quests - #shown) .. " grey quest" .. (#g.quests - #shown == 1 and "" or "s") .. " hidden.|r")
+                empty:SetText(GREY .. (#rest - #shown) .. " grey quest" .. (#rest - #shown == 1 and "" or "s") .. " hidden.|r")
+                empty:Show()
+                y = y + 22
+            elseif #rest == 0 then
+                empty:ClearAllPoints()
+                empty:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -y - 4)
+                empty:SetText(GREY .. "Nothing left to do in " .. g.zone .. ".|r")
                 empty:Show()
                 y = y + 22
             end
         else
+            ReadyLink()
             empty:ClearAllPoints()
-            empty:SetPoint("TOPLEFT", 8, -12)
+            empty:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -y - 4)
             empty:SetText(GREY .. "No quests for " .. (here or "this zone") .. ".|r\n\n" .. "Open the |cffffd100All|r tab to see your other quests.")
             empty:Show()
         end
@@ -1275,6 +1291,27 @@ function UI.Init(savedDB)
     share:SetScript("OnLeave", function() GameTooltip:Hide() end)
     share:Hide()
     UI.shareBtn = share
+
+    local link = CreateFrame("Button", nil, content)
+    link:SetHeight(SECTION_H)
+    link.text = link:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    link.text:SetPoint("LEFT", 4, 0)
+    link.text:SetPoint("RIGHT", -4, 0)
+    link.text:SetJustifyH("LEFT")
+    link.text:SetWordWrap(false)
+    local lhl = link:CreateTexture(nil, "HIGHLIGHT")
+    lhl:SetAllPoints()
+    lhl:SetColorTexture(1, 0.82, 0, 0.08)
+    link:SetScript("OnClick", function() UI.SelectTab("turnin") end)
+    link:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("Ready to turn in")
+        GameTooltip:AddLine("Finished quests are in the Turn in tab, grouped by where you hand them in. Click to open it.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    link:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    link:Hide()
+    UI.readyLink = link
 
     -- All tab: search box (title, objectives or zone)
     local okS, box = pcall(CreateFrame, "EditBox", "QuestSidebarSearch", content, "SearchBoxTemplate")
