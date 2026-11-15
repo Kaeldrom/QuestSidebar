@@ -694,6 +694,7 @@ function UI.ApplyScroll()
         UI.bar:SetValue(scrollY)
         if (UI.maxScroll or 0) > 0 then UI.bar:Show() else UI.bar:Hide() end
     end
+    if UI.UpdateItemButtons then UI.UpdateItemButtons() end
 end
 
 function UI.Scroll(delta)
@@ -767,6 +768,7 @@ end
 
 function UI.ApplyScale()
     if panel then panel:SetScale(db.settings.scale or 1) end
+    if UI.UpdateItemButtons then UI.UpdateItemButtons() end
 end
 
 -- Opacity fades the window's background and zone bars; text, icons and buttons stay solid.
@@ -893,6 +895,7 @@ local function BuildSettings()
     items[#items + 1] = Check(settings, "Minimap button", "minimap", function() UI.ApplyMinimap() end)
     items[#items + 1] = Check(settings, "Auto-share new quests with party", "autoShare")
     items[#items + 1] = Check(settings, "Hide grey (low level) quests", "hideGrey")
+    items[#items + 1] = Check(settings, "Quest item buttons", "questItems", function() UI.UpdateItemButtons() end)
 
     local y = -32
     for _, it in ipairs(items) do
@@ -958,6 +961,7 @@ function UI.ApplyMinimized()
         if m then panel.Inset:Hide() else panel.Inset:Show() end
     end
     if m and UI.bar then UI.bar:Hide() end
+    if UI.UpdateItemButtons then UI.UpdateItemButtons() end
     local size = db.size or { DEFAULT_W, DEFAULT_H }
     panel:SetHeight(m and SHRUNK_H or size[2])
     if UI.minBtn then StyleMinButton(UI.minBtn, m) end
@@ -1046,6 +1050,118 @@ function UI.ApplyMinimap()
     if db.settings.minimap then mapBtn:Show() else mapBtn:Hide() end
 end
 
+
+---------------------------------------------------------------------------
+-- Quest item buttons
+---------------------------------------------------------------------------
+-- Using an item is protected, so these are secure buttons. A protected button may
+-- only be anchored to the screen, and can't be moved, shown or hidden in combat:
+-- they sit just outside the sidebar, level with their quest, placed by screen
+-- position. In combat they stay where they are and still work; they line up
+-- again when the fight ends.
+local itemButtons, itemsDirty = {}, false
+local ITEM_SIZE = 24
+
+local function ItemButton(i)
+    local b = itemButtons[i]
+    if b then return b end
+    b = CreateFrame("Button", "QuestSidebarItem" .. i, UIParent, "SecureActionButtonTemplate")
+    b:SetSize(ITEM_SIZE, ITEM_SIZE)
+    b:SetFrameStrata("MEDIUM")
+    b:RegisterForClicks("AnyUp", "AnyDown")
+    b:SetAttribute("type", "item")
+    b.icon = b:CreateTexture(nil, "ARTWORK")
+    b.icon:SetAllPoints()
+    b.border = b:CreateTexture(nil, "OVERLAY")
+    b.border:SetPoint("TOPLEFT", -1, 1)
+    b.border:SetPoint("BOTTOMRIGHT", 1, -1)
+    b.border:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+    b.border:SetTexCoord(0.2, 0.8, 0.2, 0.8)
+    b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    b:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
+    b.count = b:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+    b.count:SetPoint("BOTTOMRIGHT", -1, 1)
+    b.cooldown = CreateFrame("Cooldown", nil, b, "CooldownFrameTemplate")
+    b.cooldown:SetAllPoints(b.icon)
+    b:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        if self.logIndex and GameTooltip.SetQuestLogSpecialItem then
+            GameTooltip:SetQuestLogSpecialItem(self.logIndex)
+        elseif self.itemID and GameTooltip.SetItemByID then
+            GameTooltip:SetItemByID(self.itemID)
+        end
+        if self.questTitle then GameTooltip:AddLine("For: " .. self.questTitle, 1, 0.82, 0) end
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:Hide()
+    itemButtons[i] = b
+    return b
+end
+
+function UI.UpdateItemCooldowns()
+    for _, b in ipairs(itemButtons) do
+        if b:IsShown() and b.itemID then
+            local start, duration, enable
+            if b.logIndex and GetQuestLogSpecialItemCooldown then
+                start, duration, enable = GetQuestLogSpecialItemCooldown(b.logIndex)
+            elseif C_Container and C_Container.GetItemCooldown then
+                start, duration, enable = C_Container.GetItemCooldown(b.itemID)
+            end
+            if start and CooldownFrame_Set and not (issecretvalue and issecretvalue(start)) then
+                CooldownFrame_Set(b.cooldown, start, duration, enable)
+            end
+        end
+    end
+end
+
+function UI.UpdateItemButtons()
+    if InCombatLockdown and InCombatLockdown() then itemsDirty = true; return end
+    itemsDirty = false
+    local used = 0
+    local showing = panel and panel:IsShown() and not db.minimized and db.settings.questItems ~= false
+    if showing then
+        local viewTop, viewBottom = scroll:GetTop(), scroll:GetBottom()
+        -- sidebar on the right half of the screen: buttons on its left, and the other way round
+        local left, right = panel:GetLeft(), panel:GetRight()
+        local screenMid = (UIParent:GetWidth() or 0) / 2
+        local onLeft = not (left and right and ((left + right) / 2) * (panel:GetEffectiveScale() / UIParent:GetEffectiveScale()) < screenMid)
+        local scale = panel:GetEffectiveScale() / UIParent:GetEffectiveScale()
+        for _, r in ipairs(quests) do
+            if r:IsShown() and r.quest then
+                local item = QSB.QuestItem(r.quest)
+                local top = r:GetTop()
+                local inView = top and (not viewTop or top <= viewTop + 1) and (not viewBottom or top - ITEM_SIZE >= viewBottom - 1)
+                if item and inView then
+                    used = used + 1
+                    local b = ItemButton(used)
+                    if b.itemID ~= item.itemID then
+                        b.itemID = item.itemID
+                        b:SetAttribute("item", "item:" .. item.itemID)
+                    end
+                    b.icon:SetTexture(item.texture)
+                    b.logIndex = item.logIndex
+                    b.questTitle = r.quest.title
+                    b.count:SetText((item.charges and item.charges > 1) and tostring(item.charges) or "")
+                    b:SetScale(scale)
+                    b:ClearAllPoints()
+                    if onLeft then
+                        b:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", (left or 0) - 3, top - 1)
+                    else
+                        b:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", (right or 0) + 3, top - 1)
+                    end
+                    b:Show()
+                end
+            end
+        end
+    end
+    for i = used + 1, #itemButtons do itemButtons[i]:Hide(); itemButtons[i].itemID = nil end
+    UI.itemsShown = used
+    UI.UpdateItemCooldowns()
+end
+function UI.ItemButtons() return itemButtons end -- tests
+function UI.ItemsDirty() return itemsDirty end -- tests
+
 function UI.Init(savedDB)
     db = savedDB
     local ok, f = pcall(CreateFrame, "Frame", "QuestSidebarFrame", UIParent, "BasicFrameTemplateWithInset")
@@ -1069,8 +1185,13 @@ function UI.Init(savedDB)
     elseif panel.SetMinResize then panel:SetMinResize(MIN_W, MIN_H); panel:SetMaxResize(MAX_W, MAX_H) end
     panel:EnableMouse(true)
     panel:RegisterForDrag("LeftButton")
-    panel:SetScript("OnDragStart", function(self) if not db.settings.locked then self:StartMoving() end end)
-    panel:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SavePosition() end)
+    panel:SetScript("OnDragStart", function(self)
+        if db.settings.locked then return end
+        self:StartMoving()
+        -- the item buttons can't follow a moving window; hide them until it stops
+        if not InCombatLockdown() then for _, b in ipairs(itemButtons) do b:Hide() end end
+    end)
+    panel:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SavePosition(); UI.UpdateItemButtons() end)
 
     local titleText = type(panel.TitleText) == "table" and panel.TitleText
     if not titleText then
@@ -1217,11 +1338,13 @@ function UI.Init(savedDB)
             UI.SelectTab("zone") -- Current Zone is where it opens
         end
         UI.ApplyTracker()
+        UI.UpdateItemButtons()
     end)
     panel:SetScript("OnHide", function(self)
         if self:IsShown() then return end -- the whole UI was hidden (Alt+Z), not us
         db.hidden = true
         UI.ApplyTracker(true)
+        UI.UpdateItemButtons()
     end)
 
     ApplyPosition()

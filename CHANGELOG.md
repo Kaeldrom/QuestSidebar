@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.0 - 2026-11-15
+
+- **Quest item buttons.** A quest that needs you to use an item now has a button for it just outside the sidebar, level with the quest. Click it to use the item; it shows charges and its cooldown. It works in combat too; if the list moves mid-fight, the buttons line up again when combat ends. It uses the game's own quest item, or, for older quests that don't flag one, the item the quest gave you (from Questie's data) if it's in your bags. Turn it off with **Quest item buttons** in settings.
+- **Fixed:** some quests were listed under the place you did the objective instead of where you hand them in. For example, Earthen Echo showed under "Excavation Site: Wetlands" instead of Mulgore. Turn-in places now come straight from Questie's data, even before Questie has finished starting up, and the misleading map from the game is no longer used.
+
 ## 1.10.0 - 2026-11-15
 
 - **The Turn in tab is grouped by where you hand quests in**, not the zone you got them in. A quest you did in the Barrens but hand in at Orgrimmar is listed under **Orgrimmar**. The place you're in comes first, then A to Z. Inside each place, quests are listed nearest first.

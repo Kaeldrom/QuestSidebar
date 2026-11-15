@@ -14,7 +14,7 @@ local QSB = {}
 QuestSidebar = QSB
 
 local DEFAULTS = { autoZone = true, hideTracker = true, locked = false, scale = 1, showObjectives = true, opacity = 1, minimap = true,
-                   autoShare = false, hideGrey = false }
+                   autoShare = false, hideGrey = false, questItems = true }
 
 local db
 QSB.open = {}          -- zones opened by hand this visit (cleared when you change zone)
@@ -372,6 +372,66 @@ end
 QSB.OnZoneChanged = OnZoneChanged
 
 ---------------------------------------------------------------------------
+-- The item a quest wants you to use
+---------------------------------------------------------------------------
+-- The game's own quest item first (GetQuestLogSpecialItemInfo). Many old quests
+-- don't flag theirs, so then Questie's data: the item the quest gave you, if
+-- it is in your bags and has a "Use:" effect.
+-- { itemID, texture, charges, logIndex (when the game flagged it) } or nil
+local sourceCache = {}
+
+local function ItemCount(id)
+    if C_Item and C_Item.GetItemCount then return C_Item.GetItemCount(id) or 0 end
+    if GetItemCount then return GetItemCount(id) or 0 end
+    return 0
+end
+
+local function Usable(id)
+    local spell = (C_Item and C_Item.GetItemSpell and C_Item.GetItemSpell(id)) or (GetItemSpell and GetItemSpell(id))
+    return spell ~= nil
+end
+
+local function ItemIcon(id)
+    return (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(id)) or (GetItemIcon and GetItemIcon(id))
+        or "Interface\\Icons\\INV_Misc_QuestionMark"
+end
+
+local function SourceItems(questID)
+    local v = sourceCache[questID]
+    if v ~= nil then return v end
+    v = {}
+    local L = LibQuestieDB
+    if type(L) == "table" and L.Quest and L.Quest.Get then
+        local ok, id = pcall(L.Quest.Get, questID, "sourceItemId")
+        if ok and type(id) == "number" and id > 0 then v[#v + 1] = id end
+        local ok2, list = pcall(L.Quest.Get, questID, "requiredSourceItems")
+        if ok2 and type(list) == "table" then
+            for _, i in ipairs(list) do if type(i) == "number" and i > 0 then v[#v + 1] = i end end
+        end
+        sourceCache[questID] = v
+    end
+    return v -- not cached while Questie isn't there yet
+end
+
+function QSB.QuestItem(q)
+    if not q or not q.questID or q.questID == 0 then return nil end
+    if GetQuestLogSpecialItemInfo and q.index then
+        local ok, link, texture, charges, showWhenComplete = pcall(GetQuestLogSpecialItemInfo, q.index)
+        if ok and type(link) == "string" and not IsSecret(link) and (not q.complete or showWhenComplete) then
+            local id = tonumber(link:match("item:(%d+)"))
+            if id then return { itemID = id, texture = texture or ItemIcon(id), charges = charges, logIndex = q.index } end
+        end
+    end
+    if q.complete then return nil end
+    for _, id in ipairs(SourceItems(q.questID)) do
+        if ItemCount(id) > 0 and Usable(id) then
+            local n = ItemCount(id)
+            return { itemID = id, texture = ItemIcon(id), charges = n > 1 and n or nil }
+        end
+    end
+end
+
+---------------------------------------------------------------------------
 -- Where a finished quest is handed in
 ---------------------------------------------------------------------------
 -- Questie's database (LibQuestieDB) names the turn-in NPC or object and where it
@@ -386,14 +446,46 @@ local function MapName(uiMapID)
     if name and not IsSecret(name) and name ~= "" then return name end
 end
 
+-- QuestieDB ships the area -> map table as data ("return { ... }" strings), ready as
+-- soon as it loads. Questie's own ZoneDB only answers once Questie has started up,
+-- which can be well after we first draw.
+local areaMap
+local function SupportAreaMap()
+    if areaMap ~= nil then return areaMap or nil end
+    local L = LibQuestieDB
+    local zone = type(L) == "table" and L.Support and L.Support.Get and L.Support.Get("ZoneDB")
+    local private = zone and zone.private
+    if not private then return nil end -- not loaded yet: try again later
+    local out = {}
+    for _, key in ipairs({ "areaIdToUiMapId", "areaIdToUiMapIdOverride" }) do
+        local src = private[key]
+        if type(src) == "string" then
+            local fn = loadstring and loadstring(src)
+            local ok, t = false, nil
+            if fn then
+                if setfenv then setfenv(fn, {}) end -- plain data: no globals
+                ok, t = pcall(fn)
+            end
+            if ok and type(t) == "table" then for a, m in pairs(t) do out[a] = m end end
+        elseif type(src) == "table" then
+            for a, m in pairs(src) do out[a] = m end
+        end
+    end
+    areaMap = next(out) and out or false
+    return areaMap or nil
+end
+
 local function AreaToUiMap(areaID)
     if QuestieLoader and QuestieLoader.ImportModule then
         local ok, zoneDB = pcall(QuestieLoader.ImportModule, QuestieLoader, "ZoneDB")
         if ok and zoneDB and zoneDB.GetUiMapIdByAreaId then
             local ok2, map = pcall(zoneDB.GetUiMapIdByAreaId, zoneDB, areaID)
-            if ok2 and type(map) == "number" then return map end
+            if ok2 and type(map) == "number" and map > 0 then return map end
         end
     end
+    local t = SupportAreaMap()
+    local map = t and t[areaID]
+    if type(map) == "number" and map > 0 then return map end
 end
 
 local function FromQuestie(questID)
@@ -432,25 +524,14 @@ local function FromQuestie(questID)
     end
 end
 
+-- Only the game's waypoint to the hand-in. (The quest's own map can be where the
+-- objective was, e.g. "Excavation Site: Wetlands" for a quest handed in in Mulgore,
+-- so it is not used for turn-ins.)
 local function FromClient(q)
-    if not C_QuestLog then return nil end
-    if C_QuestLog.GetNextWaypoint then
-        local ok, map, x, y = pcall(C_QuestLog.GetNextWaypoint, q.questID)
-        if ok and type(map) == "number" and type(x) == "number" and not IsSecret(x) then
-            return { zone = MapName(map), map = map, x = x, y = y }
-        end
-    end
-    if GetQuestUiMapID and C_QuestLog.GetQuestsOnMap then
-        local ok, map = pcall(GetQuestUiMapID, q.questID, true)
-        if ok and type(map) == "number" and map > 0 then
-            for _, poi in ipairs(C_QuestLog.GetQuestsOnMap(map) or {}) do
-                if poi.questID == q.questID and not poi.isQuestStart and type(poi.x) == "number" then
-                    return { zone = MapName(map), map = map, x = poi.x, y = poi.y }
-                end
-            end
-            local zone = MapName(map)
-            if zone then return { zone = zone, map = map } end
-        end
+    if not C_QuestLog or not C_QuestLog.GetNextWaypoint then return nil end
+    local ok, map, x, y = pcall(C_QuestLog.GetNextWaypoint, q.questID)
+    if ok and type(map) == "number" and type(x) == "number" and not IsSecret(x) then
+        return { zone = MapName(map), map = map, x = x, y = y }
     end
 end
 
@@ -1131,7 +1212,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
         for _, ev in ipairs({ "QUEST_LOG_UPDATE", "QUEST_WATCH_LIST_CHANGED", "UNIT_QUEST_LOG_CHANGED", "QUEST_ACCEPTED",
                               "QUEST_REMOVED", "QUEST_TURNED_IN", "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED",
                               "ZONE_CHANGED_INDOORS", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED",
-                              "GROUP_ROSTER_UPDATE", "CHAT_MSG_SYSTEM", "PLAYER_LEVEL_UP" }) do
+                              "GROUP_ROSTER_UPDATE", "CHAT_MSG_SYSTEM", "PLAYER_LEVEL_UP",
+                              "BAG_UPDATE_DELAYED", "BAG_UPDATE_COOLDOWN", "PLAYER_REGEN_DISABLED" }) do
             pcall(frame.RegisterEvent, frame, ev)
         end
         local spf = ShortestPathForever and ShortestPathForever.API
@@ -1147,6 +1229,11 @@ frame:SetScript("OnEvent", function(_, event, ...)
     elseif event == "QUEST_ACCEPTED" then
         OnQuestAccepted(...)
         QSB.QueueRefresh()
+    elseif event == "BAG_UPDATE_COOLDOWN" then
+        if QSB.UI and QSB.UI.UpdateItemCooldowns then QSB.UI.UpdateItemCooldowns() end
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        -- last moment before combat locks the item buttons: put them right
+        if QSB.UI and QSB.UI.UpdateItemButtons then QSB.UI.UpdateItemButtons() end
     elseif event == "QUEST_TURNED_IN" then
         OnTurnedIn(...)
         QSB.QueueRefresh()

@@ -55,6 +55,8 @@ function Widget:Disable() self.disabled = true end
 function Widget:Enable() self.disabled = false end
 function Widget:GetParent() return self.parent end
 function Widget:SetNormalTexture(t) self.normal = t end
+function Widget:SetAttribute(k, v) self.attrs = self.attrs or {}; self.attrs[k] = v end
+function Widget:GetAttribute(k) return self.attrs and self.attrs[k] end
 function Widget:GetCenter() return 0, 0 end
 function Widget:GetEffectiveScale() return 1 end
 function CreateFrame(kind, name, parent, template)
@@ -791,6 +793,87 @@ lua.execute("QuestSidebar.StopChain(true)")
 # without Questie: grouped by the quest's own zone, as before
 lua.execute("LibQuestieDB = nil; QuestieLoader = nil")
 check("place lookup is cached", lua.eval("QuestSidebar.TurnInPlace({ questID = 5 }).zone") == "The Barrens")
+
+# ---- 1.11.0: Earthen Echo hands in at Mulgore, not the objective's map ----------------------------------
+lua.execute("""
+LOG = {
+  { title = "Wetlands", isHeader = true },
+  { title = "Earthen Echo", level = 31, questID = 98823, isComplete = true, obj = {} },
+}
+-- real QuestieDB rows for this quest (decoded from QuestieDB_Forever.toc)
+LibQuestieDB = {
+  Quest = { Get = function(id, key) if id == 98823 and key == "finishedBy" then return { { 259118 } } end end },
+  Npc = { Get = function(id, key)
+    local n = { name = "Muln Earthfury", zoneID = 215, spawns = { [215] = { { 33.42, 22.59 } } } }
+    if id == 259118 then return n[key] end end },
+  Support = { Get = function(m) if m == "ZoneDB" then return { private = {
+    areaIdToUiMapId = "return { [215] = 1412, [17732] = 1437, [17223] = 1412 }",
+    areaIdToUiMapIdOverride = "return { [0] = 0 }" } } end end },
+}
+-- Questie has loaded but its ZoneDB hasn't started up yet
+QuestieLoader = { ImportModule = function(self, name) return { GetUiMapIdByAreaId = function() return nil end } end }
+C_Map.GetMapInfo = function(m) return ({ [1412] = { name = "Mulgore" }, [1437] = { name = "Wetlands" }, [99001] = { name = "Excavation Site: Wetlands" } })[m] end
+-- the game's quest map points at the objective
+function GetQuestUiMapID() return 99001 end
+C_QuestLog.GetQuestsOnMap = function() return {} end
+NOW = NOW + 60; ZONE = 'Thunder Bluff'; QuestSidebar.UI.SelectTab('turnin')""")
+ev("ZONE_CHANGED_NEW_AREA"); lua.execute("run_timers()")
+check("Earthen Echo under Mulgore", hdrs() == ["Mulgore"])
+check("names Muln Earthfury", row("Earthen Echo").details.text == "Hand in to Muln Earthfury in Mulgore.")
+check("not the objective's map", "Excavation" not in " ".join(hdrs()))
+
+# ---- 1.11.0: quest item buttons ------------------------------------------------------------------------
+reset_log()
+lua.execute("""
+SPECIAL = { [3] = { "|cffffffff|Hitem:5056:0|h[Raptor Lure]|h|r", "Interface\\\\Icons\\\\INV_Misc_Bone_01", 3, false } }
+function GetQuestLogSpecialItemInfo(index)
+  local e = C_QuestLog.GetInfo(index); local s = e and SPECIAL[e.questID]
+  if s then return s[1], s[2], s[3], s[4] end
+end
+BAGS = { [6000] = 1 }
+C_Item = { GetItemCount = function(id) return BAGS[id] or 0 end,
+           GetItemSpell = function(id) if id == 6000 then return "Use", 123 end end,
+           GetItemIconByID = function(id) return "icon" .. id end }
+LibQuestieDB.Quest.Get = function(id, key) if id == 5 and key == "sourceItemId" then return 6000 end end
+COMBAT = false; ZONE = 'The Barrens'; QuestSidebar.UI.SelectTab('zone')""")
+ev("ZONE_CHANGED_NEW_AREA"); lua.execute("run_timers()")
+def item_buttons(): return [b for b in lua.eval("QuestSidebar.UI.ItemButtons()").values() if b.shown]
+bs = item_buttons()
+check("buttons for quests with items", len(bs) == 2)
+attrs = sorted(b.attrs["item"] for b in bs)
+check("secure item attributes", attrs == ["item:5056", "item:6000"] and all(b.attrs["type"] == "item" for b in bs))
+raptor = [b for b in bs if b.attrs["item"] == "item:5056"][0]
+check("game's quest item: charges + log index", raptor.count.text == "3" and raptor.logIndex is not None)
+check("tooltip names the quest", raptor.questTitle == "Raptor Thieves")
+check("Questie source item used when the game flags none", any(b.attrs["item"] == "item:6000" and b.icon.texture == "icon6000" for b in bs))
+
+lua.execute("BAGS = {}"); ev("BAG_UPDATE_DELAYED"); lua.execute("run_timers()")
+check("item gone from bags: button gone", sorted(b.attrs["item"] for b in item_buttons()) == ["item:5056"])
+
+lua.execute("for _, e in ipairs(LOG) do if e.questID == 3 then e.isComplete = true end end; QuestSidebar.Refresh()")
+check("finished quest: no item button", item_buttons() == [])
+lua.execute("SPECIAL[3][4] = true; QuestSidebar.Refresh()")
+check("unless the item is still wanted when done", len(item_buttons()) == 1)
+lua.execute("for _, e in ipairs(LOG) do if e.questID == 3 then e.isComplete = false end end; SPECIAL[3][4] = false; QuestSidebar.Refresh()")
+
+# combat: buttons are locked; they catch up afterwards
+lua.execute("COMBAT = true; SPECIAL[2] = { '|Hitem:777:0|h[x]|h', 'tex', 1, true }; QuestSidebar.Refresh()")
+check("in combat: no changes", len(item_buttons()) == 1 and lua.eval("QuestSidebar.UI.ItemsDirty()") is True)
+lua.execute("COMBAT = false"); ev("PLAYER_REGEN_ENABLED"); lua.execute("run_timers()")
+check("after combat: caught up", len(item_buttons()) == 2 and lua.eval("QuestSidebar.UI.ItemsDirty()") is False)
+lua.execute("SPECIAL[2] = nil; QuestSidebar.Refresh()")
+
+lua.execute("SlashCmdList.QUESTSIDEBAR('min')")
+check("minimized: buttons hidden", item_buttons() == [])
+lua.execute("SlashCmdList.QUESTSIDEBAR('min')")
+check("restored: back", len(item_buttons()) == 1)
+lua.execute("QuestSidebarFrame:Hide()")
+check("sidebar hidden: buttons hidden", item_buttons() == [])
+lua.execute("QuestSidebarFrame:Show(); QuestSidebar.UI.SelectTab('zone')")
+lua.execute("QuestSidebar.UI.ToggleSettings(); local c; for _, it in ipairs(QuestSidebarSettings.items) do if it.label and it.label.text == 'Quest item buttons' then c = it end end; c:SetChecked(false); c.scripts.OnClick(c)")
+check("setting turns them off", item_buttons() == [] and lua.eval("QuestSidebarDB.settings.questItems") is False)
+lua.execute("local c; for _, it in ipairs(QuestSidebarSettings.items) do if it.label and it.label.text == 'Quest item buttons' then c = it end end; c:SetChecked(true); c.scripts.OnClick(c)")
+check("and back on", len(item_buttons()) == 1)
 
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
