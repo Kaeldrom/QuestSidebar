@@ -168,8 +168,43 @@ local function NewHeader()
     h.plus:SetSize(3, 11)
     h.plus:SetPoint("CENTER", h.dash, "CENTER")
     h.plus:SetColorTexture(1, 0.82, 0, 1)
+    -- Turn in tab: route to every hand-in at this place, nearest first
+    h.chain = CreateFrame("Button", nil, h)
+    h.chain:SetSize(18, 18)
+    h.chain:SetPoint("RIGHT", h.count, "LEFT", -6, 0)
+    h.chain.icon = h.chain:CreateTexture(nil, "ARTWORK")
+    h.chain.icon:SetAllPoints()
+    h.chain.icon:SetTexture(ICON_ROUTE)
+    h.chain.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    h.chain:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    h.chain.on = h.chain:CreateTexture(nil, "OVERLAY")
+    h.chain.on:SetPoint("TOPLEFT", -3, 3)
+    h.chain.on:SetPoint("BOTTOMRIGHT", 3, -3)
+    h.chain.on:SetTexture("Interface\\Buttons\\CheckButtonHilight")
+    h.chain.on:SetBlendMode("ADD")
+    h.chain.on:SetVertexColor(1, 0.82, 0)
+    h.chain.on:Hide()
+    h.chain:SetScript("OnClick", function(self)
+        local hd = self:GetParent()
+        QSB.ChainTurnIns(hd.zone, hd.quests)
+    end)
+    h.chain:SetScript("OnEnter", function(self)
+        local hd = self:GetParent()
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        if QSB.ChainZone() == hd.zone then
+            GameTooltip:AddLine("Stop the turn-in route")
+        else
+            GameTooltip:AddLine("Route to every turn-in here")
+            GameTooltip:AddLine("Takes you to each hand-in at " .. hd.zone .. ", nearest first, and moves on to the next one each time you hand a quest in."
+                .. (QSB.HasRouter() and "" or " Install Shortest Path Forever for full routes; without it the quest arrow points the way."), 0.8, 0.8, 0.8, true)
+        end
+        GameTooltip:Show()
+    end)
+    h.chain:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    h.chain:Hide()
     h:RegisterForClicks("LeftButtonUp")
     h:SetScript("OnClick", function(self)
+        if UI.tab == "turnin" then return end -- turn-in places don't fold
         if IsShiftKeyDown() then QSB.TogglePin(self.zone) else QSB.ToggleZone(self.zone) end
     end)
     h:SetScript("OnEnter", function(self)
@@ -372,7 +407,17 @@ local function FillQuest(r, q, width, showDetails)
     end
 
     -- for a finished quest, say who to hand it to when the game tells us
-    local details = showDetails and not folded and ((q.complete and QSB.TurnIn(q)) or QSB.Details(q))
+    local details
+    if showDetails and not folded then
+        if q.complete then
+            local place = QSB.TurnInPlace(q)
+            details = QSB.TurnIn(q)
+                or (place and place.npc and ("Hand in to " .. place.npc .. (place.zone and (" in " .. place.zone) or "") .. "."))
+                or QSB.Details(q)
+        else
+            details = QSB.Details(q)
+        end
+    end
     r.details:ClearAllPoints()
     r.details:SetPoint("TOPLEFT", 30, -h - 2)
     r.details:SetWidth(width - 36)
@@ -437,7 +482,16 @@ function UI.Draw(groups)
         h.text:SetText(name .. (db.pinned[g.zone] and "|cff66ddff  (pinned)|r" or ""))
         h.count:SetText((g.done > 0 and (GREEN .. g.done .. "|r/") or "") .. #g.quests)
         h.open = open
+        h.quests = g.quests
         if open then h.plus:Hide() else h.plus:Show() end
+        if UI.tab == "turnin" then
+            h.chain:Show()
+            if QSB.ChainZone() == g.zone then h.chain.on:Show() else h.chain.on:Hide() end
+            h.text:SetPoint("RIGHT", -76, 0)
+        else
+            h.chain:Hide()
+            h.text:SetPoint("RIGHT", -52, 0)
+        end
         h.bar:SetAlpha(math.max(0.35, db.settings.opacity or 1))
         h:Show()
         y = y + HEADER_H + 4
@@ -530,16 +584,29 @@ function UI.Draw(groups)
             empty:Show()
         end
     elseif UI.tab == "turnin" then
-        -- every finished quest, by zone; the zone you're in first
-        local list = {}
+        -- every finished quest, grouped by where it's handed in (not where you got it);
+        -- the place you're in first, the rest A-Z, quests nearest first
+        local byPlace, list = {}, {}
         for _, g in ipairs(groups) do
-            local ready = {}
-            for _, q in ipairs(g.quests) do if q.complete then ready[#ready + 1] = q end end
-            if #ready > 0 then
-                local entry = { zone = g.zone, quests = ready, done = #ready }
-                if g.zone == here then table.insert(list, 1, entry) else list[#list + 1] = entry end
+            for _, q in ipairs(g.quests) do
+                if q.complete then
+                    local place = QSB.TurnInPlace(q)
+                    local zone = (place and place.zone) or g.zone
+                    local entry = byPlace[zone]
+                    if not entry then
+                        entry = { zone = zone, quests = {}, done = 0 }
+                        byPlace[zone] = entry
+                        list[#list + 1] = entry
+                    end
+                    entry.quests[#entry.quests + 1] = q
+                end
             end
         end
+        table.sort(list, function(a, b)
+            if (a.zone == here) ~= (b.zone == here) then return a.zone == here end
+            return QSB.SortKey(a.zone) < QSB.SortKey(b.zone)
+        end)
+        for _, e in ipairs(list) do e.quests = QSB.NearestOrder(e.quests) end
         -- what handing everything in is worth
         local xpSum = 0
         for _, g in ipairs(list) do

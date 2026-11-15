@@ -698,5 +698,99 @@ check("asked again after 10s and shown", "+1,700 XP" in row("Plainstrider").obje
 lua.execute("GetQuestLogRewardXP = nil; QuestSidebar.Refresh()")
 check("client without the call: fine", "Ready to turn in" in row("Plainstrider").objectives.text)
 
+# ---- 1.10.0: Turn in tab by hand-in place + chain route ------------------------------------------------
+reset_log()
+lua.execute("""
+for _, e in ipairs(LOG) do if e.questID == 1 or e.questID == 5 then e.isComplete = true end end
+TURNIN = {}
+-- Questie's database: who finishes each quest, and where they stand
+local QUESTS = { [2] = { { 100 } }, [1] = { { 101 } }, [5] = { { 102 } } }
+local NPCS = {
+  [100] = { name = "Thrall", zoneID = 1637, spawns = { [1637] = { { 31, 37 } } } },
+  [101] = { name = "Kildrath", zoneID = 1637, spawns = { [1637] = { { 60, 50 } } } },
+  [102] = { name = "Regthar Deathgate", zoneID = 17, spawns = { [17] = { { 45, 58 } } } },
+}
+LibQuestieDB = {
+  Quest = { Get = function(id, key) local q = QUESTS[id]; if key == "finishedBy" then return q end end },
+  Npc = { Get = function(id, key) local n = NPCS[id]; return n and n[key] end },
+}
+local ZONES = { [1637] = 1454, [17] = 1413 }
+QuestieLoader = { ImportModule = function(self, name)
+  if name == "ZoneDB" then return { GetUiMapIdByAreaId = function(_, a) return ZONES[a] end } end end }
+local NAMES = { [1454] = "Orgrimmar", [1413] = "The Barrens" }
+function CreateVector2D(x, y) return { x = x, y = y, GetXY = function(v) return v.x, v.y end } end
+C_Map = {
+  GetMapInfo = function(m) return NAMES[m] and { name = NAMES[m] } end,
+  GetWorldPosFromMapPos = function(m, v) return 1, CreateVector2D(m * 1000 + v.x * 100, v.y * 100) end,
+  GetBestMapForUnit = function() return PLAYER_MAP end,
+  GetPlayerMapPosition = function() return CreateVector2D(PLAYER_X, PLAYER_Y) end,
+}
+PLAYER_MAP, PLAYER_X, PLAYER_Y = 1454, 0.58, 0.50   -- standing next to Kildrath in Orgrimmar
+NAV = nil; CANCELS = 0
+ShortestPathForever = { API = {
+  Active = function() return NAV ~= nil end,
+  NavigateRoute = function(owner, stops) NAV = { owner = owner, stops = stops }; return true end,
+  Cancel = function(owner) CANCELS = CANCELS + 1; NAV = nil; return true end,
+} }
+NOW = NOW + 60; ZONE = 'Orgrimmar'; QuestSidebar.UI.SelectTab('turnin')""")
+ev("ZONE_CHANGED_NEW_AREA"); lua.execute("run_timers()")
+
+check("grouped by hand-in place", hdrs() == ["Orgrimmar", "The Barrens"])
+check("quests from other zones hand in at Orgrimmar", [t for t in qtitles()][:2] == [t for t in qtitles() if "Stonetalon" in t or "Plainstrider" in t])
+check("nearest first inside a place", "Stonetalon" in qtitles()[0] and "Plainstrider" in qtitles()[1])
+check("hand-in NPC named", row("Stonetalon").details.text == "Hand in to Kildrath in Orgrimmar.")
+check("game's own turn-in text wins over the NPC name", row("Plainstrider").details.text.startswith("Return to Regthar"))
+check("place headers have a route-all button", header("Orgrimmar").chain.shown and header("The Barrens").chain.shown)
+check("plain count on place headers", header("Orgrimmar").count.text == "2")
+
+# start the chain at Orgrimmar
+lua.execute("local h; for _, x in ipairs(QuestSidebar.UI.Headers()) do if x.shown and x.zone == 'Orgrimmar' then h = x end end; h.chain.scripts.OnClick(h.chain); run_timers()")
+stops = list(lua.eval("NAV.stops").values())
+check("one journey with a stop per hand-in", lua.eval("NAV.owner") == "QuestSidebar" and len(stops) == 2)
+check("nearest stop first", stops[0].questID == 1 and stops[1].questID == 2)
+check("stops name the NPC", stops[0].title.startswith("Kildrath:") and stops[1].title.startswith("Thrall:"))
+check("stops wait for the hand-in", stops[0].hold is True)
+check("stop coordinates from Questie", abs(stops[1].x - 0.31) < 1e-9 and stops[1].map == 1454)
+check("only that place's quests", all(s.questID != 5 for s in stops))
+check("header glows while routing", header("Orgrimmar").chain.on.shown and not header("The Barrens").chain.on.shown)
+check("chat says the order", "nearest first: Stonetalon Standstill, Plainstrider Menace" in last_print())
+
+# hand in the first: re-planned from here with what's left
+lua.execute("for i, e in ipairs(LOG) do if e.questID == 1 then table.remove(LOG, i) break end end; PLAYER_X, PLAYER_Y = 0.6, 0.5")
+ev("QUEST_TURNED_IN", 1); lua.execute("run_timers(); run_timers()")
+stops = list(lua.eval("NAV.stops").values())
+check("after a hand-in: the rest re-planned", len(stops) == 1 and stops[0].questID == 2)
+lua.execute("for i, e in ipairs(LOG) do if e.questID == 2 then table.remove(LOG, i) break end end")
+ev("QUEST_TURNED_IN", 2); lua.execute("run_timers(); run_timers()")
+check("all done: finished message", "All handed in at Orgrimmar" in last_print() and lua.eval("QuestSidebar.ChainZone()") is None)
+check("journey cancelled at the end", lua.eval("NAV") is None)
+
+# toggle: start then stop
+reset_log()
+lua.execute("for _, e in ipairs(LOG) do if e.questID == 1 or e.questID == 5 then e.isComplete = true end end; QuestSidebar.Refresh()")
+lua.execute("local h; for _, x in ipairs(QuestSidebar.UI.Headers()) do if x.shown and x.zone == 'Orgrimmar' then h = x end end; h.chain.scripts.OnClick(h.chain); run_timers()")
+c = lua.eval("CANCELS")
+lua.execute("local h; for _, x in ipairs(QuestSidebar.UI.Headers()) do if x.shown and x.zone == 'Orgrimmar' then h = x end end; h.chain.scripts.OnClick(h.chain); run_timers()")
+check("second click stops the chain", lua.eval("QuestSidebar.ChainZone()") is None and lua.eval("CANCELS") == c + 1 and "Stopped the turn-in route" in last_print())
+
+# a single quest route replaces a chain
+lua.execute("local h; for _, x in ipairs(QuestSidebar.UI.Headers()) do if x.shown and x.zone == 'Orgrimmar' then h = x end end; h.chain.scripts.OnClick(h.chain); run_timers()")
+lua.execute("local r; for _, q in ipairs(QuestSidebar.UI.Quests()) do if q.shown and q.title.text:find('Kolkar') then r = q end end; r.route.scripts.OnClick(r.route); run_timers()")
+check("single route replaces the chain", lua.eval("QuestSidebar.ChainZone()") is None)
+lua.execute("QuestSidebar.StopRoute(true)")
+
+# without Shortest Path: the arrow steps through them
+lua.execute("ShortestPathForever = nil; ShortestPathForeverTravelToTrackedQuestButton = nil; SUPER = nil")
+lua.execute("local h; for _, x in ipairs(QuestSidebar.UI.Headers()) do if x.shown and x.zone == 'Orgrimmar' then h = x end end; h.chain.scripts.OnClick(h.chain); run_timers()")
+check("no SPF: arrow on the nearest", lua.eval("SUPER") == 1)
+lua.execute("for i, e in ipairs(LOG) do if e.questID == 1 then table.remove(LOG, i) break end end")
+ev("QUEST_TURNED_IN", 1); lua.execute("run_timers(); run_timers()")
+check("no SPF: arrow moves to the next", lua.eval("SUPER") == 2)
+lua.execute("QuestSidebar.StopChain(true)")
+
+# without Questie: grouped by the quest's own zone, as before
+lua.execute("LibQuestieDB = nil; QuestieLoader = nil")
+check("place lookup is cached", lua.eval("QuestSidebar.TurnInPlace({ questID = 5 }).zone") == "The Barrens")
+
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

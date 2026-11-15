@@ -372,6 +372,265 @@ end
 QSB.OnZoneChanged = OnZoneChanged
 
 ---------------------------------------------------------------------------
+-- Where a finished quest is handed in
+---------------------------------------------------------------------------
+-- Questie's database (LibQuestieDB) names the turn-in NPC or object and where it
+-- stands. Without it, the game's own quest marker for a finished quest is used.
+-- { zone = "Orgrimmar", npc = "Thrall", map = uiMapID, x = 0..1, y = 0..1 } or nil
+local placeCache = {}
+
+local function MapName(uiMapID)
+    if not uiMapID or not C_Map or not C_Map.GetMapInfo then return nil end
+    local info = C_Map.GetMapInfo(uiMapID)
+    local name = info and info.name
+    if name and not IsSecret(name) and name ~= "" then return name end
+end
+
+local function AreaToUiMap(areaID)
+    if QuestieLoader and QuestieLoader.ImportModule then
+        local ok, zoneDB = pcall(QuestieLoader.ImportModule, QuestieLoader, "ZoneDB")
+        if ok and zoneDB and zoneDB.GetUiMapIdByAreaId then
+            local ok2, map = pcall(zoneDB.GetUiMapIdByAreaId, zoneDB, areaID)
+            if ok2 and type(map) == "number" then return map end
+        end
+    end
+end
+
+local function FromQuestie(questID)
+    local L = LibQuestieDB
+    if type(L) ~= "table" or not L.Quest or not L.Quest.Get then return nil end
+    local ok, finishedBy = pcall(L.Quest.Get, questID, "finishedBy")
+    if not ok or type(finishedBy) ~= "table" then return nil end
+    for kind, entity in ipairs({ L.Npc, L.Object }) do
+        local ids = finishedBy[kind]
+        if entity and entity.Get and type(ids) == "table" then
+            for _, id in ipairs(ids) do
+                local _, name = pcall(entity.Get, id, "name")
+                local _, areaID = pcall(entity.Get, id, "zoneID")
+                local _, spawns = pcall(entity.Get, id, "spawns")
+                if type(spawns) == "table" then
+                    -- its main zone's spawn, else any spawn it has
+                    local list, area = (type(areaID) == "number" and areaID > 0) and spawns[areaID] or nil, areaID
+                    if type(list) ~= "table" or not list[1] then
+                        for a, l in pairs(spawns) do if type(l) == "table" and l[1] then list, area = l, a; break end end
+                    end
+                    local spot = list and list[1]
+                    local map = area and AreaToUiMap(area)
+                    if spot and map then
+                        return { zone = MapName(map), npc = type(name) == "string" and name or nil,
+                                 map = map, x = spot[1] / 100, y = spot[2] / 100 }
+                    end
+                    if area and C_Map and C_Map.GetAreaInfo then
+                        local zone = C_Map.GetAreaInfo(area)
+                        if zone and zone ~= "" then
+                            return { zone = zone, npc = type(name) == "string" and name or nil }
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function FromClient(q)
+    if not C_QuestLog then return nil end
+    if C_QuestLog.GetNextWaypoint then
+        local ok, map, x, y = pcall(C_QuestLog.GetNextWaypoint, q.questID)
+        if ok and type(map) == "number" and type(x) == "number" and not IsSecret(x) then
+            return { zone = MapName(map), map = map, x = x, y = y }
+        end
+    end
+    if GetQuestUiMapID and C_QuestLog.GetQuestsOnMap then
+        local ok, map = pcall(GetQuestUiMapID, q.questID, true)
+        if ok and type(map) == "number" and map > 0 then
+            for _, poi in ipairs(C_QuestLog.GetQuestsOnMap(map) or {}) do
+                if poi.questID == q.questID and not poi.isQuestStart and type(poi.x) == "number" then
+                    return { zone = MapName(map), map = map, x = poi.x, y = poi.y }
+                end
+            end
+            local zone = MapName(map)
+            if zone then return { zone = zone, map = map } end
+        end
+    end
+end
+
+function QSB.TurnInPlace(q)
+    if not q or not q.questID or q.questID == 0 then return nil end
+    -- Questie's answer is kept; the game's marker or "unknown" is asked again after
+    -- 10s (Questie may still be loading, and the marker can move)
+    local now = GetTime and GetTime() or 0
+    local hit = placeCache[q.questID]
+    if hit and (hit.final or now - hit.at < 10) then return hit.v end
+    local v = FromQuestie(q.questID)
+    local final = v ~= nil
+    local c = FromClient(q)
+    if v and not v.zone and c then v.zone = c.zone end
+    if v and not v.map and c and c.map then v.map, v.x, v.y = c.map, c.x, c.y end
+    v = v or c
+    if v and not v.zone then v = nil end
+    placeCache[q.questID] = { v = v, at = now, final = final and v ~= nil }
+    return v
+end
+
+---------------------------------------------------------------------------
+-- Distances: yards in the world, for nearest-first ordering
+---------------------------------------------------------------------------
+local function World(map, x, y)
+    if not (C_Map and C_Map.GetWorldPosFromMapPos and CreateVector2D) or not map or not x then return nil end
+    local ok, cont, pos = pcall(C_Map.GetWorldPosFromMapPos, map, CreateVector2D(x, y))
+    if not ok or not cont or not pos then return nil end
+    local wx, wy = pos:GetXY()
+    return cont, wx, wy
+end
+
+local function PlayerWorld()
+    if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition) then return nil end
+    local map = C_Map.GetBestMapForUnit("player")
+    if not map then return nil end
+    local pos = C_Map.GetPlayerMapPosition(map, "player")
+    if not pos then return nil end
+    local x, y = pos:GetXY()
+    if IsSecret(x) then return nil end
+    return World(map, x, y)
+end
+
+local FAR = 1e9
+local function Dist(c1, x1, y1, c2, x2, y2)
+    if not c1 or not c2 then return FAR end
+    if c1 ~= c2 then return FAR / 2 end -- another continent: last
+    return math.sqrt((x1 - x2) ^ 2 + (y1 - y2) ^ 2)
+end
+
+-- greedy nearest-next from where you stand
+function QSB.NearestOrder(list)
+    local pc, px, py = PlayerWorld()
+    local left, out = {}, {}
+    for _, q in ipairs(list) do
+        local pl = QSB.TurnInPlace(q)
+        local c, x, y
+        if pl and pl.map then c, x, y = World(pl.map, pl.x, pl.y) end
+        left[#left + 1] = { q = q, c = c, x = x, y = y }
+    end
+    while #left > 0 do
+        local best, bestD = 1, nil
+        for i, e in ipairs(left) do
+            local d = Dist(pc, px, py, e.c, e.x, e.y)
+            if not bestD or d < bestD then best, bestD = i, d end
+        end
+        local e = table.remove(left, best)
+        out[#out + 1] = e.q
+        if e.c then pc, px, py = e.c, e.x, e.y end
+    end
+    return out
+end
+
+---------------------------------------------------------------------------
+-- Chain route: every hand-in at one place, nearest first
+---------------------------------------------------------------------------
+-- Shortest Path takes the whole list as one journey with a stop per NPC. Each
+-- stop waits until you've handed that quest in; then the rest are re-planned
+-- from where you are, so it is always nearest-next. Without Shortest Path the
+-- game's arrow points at one hand-in after another.
+local OWNER = "QuestSidebar"
+local chain -- { zone, pending = {[questID] = true}, spf }
+
+function QSB.ChainZone() return chain and chain.zone or nil end
+
+local function SPFApi()
+    local api = ShortestPathForever and ShortestPathForever.API
+    if type(api) == "table" and api.NavigateRoute then return api end
+end
+
+function QSB.StopChain(quiet)
+    if not chain then return false end
+    local c = chain
+    chain = nil
+    local api = SPFApi()
+    if c.spf and api and api.Cancel then pcall(api.Cancel, OWNER) end
+    if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID and c.current then
+        local now = C_SuperTrack.GetSuperTrackedQuestID and C_SuperTrack.GetSuperTrackedQuestID()
+        if not now or now == c.current then C_SuperTrack.SetSuperTrackedQuestID(0) end
+    end
+    if not quiet then Print("Stopped the turn-in route for " .. c.zone .. ".") end
+    QSB.QueueRefresh()
+    return true
+end
+
+local function StillReady()
+    local list = {}
+    for _, g in ipairs(QSB.ReadLog()) do
+        for _, q in ipairs(g.quests) do
+            if q.complete and chain.pending[q.questID] then list[#list + 1] = q end
+        end
+    end
+    return list
+end
+
+local function AdvanceChain()
+    if not chain then return end
+    local list = StillReady()
+    if #list == 0 then
+        local zone = chain.zone
+        QSB.StopChain(true)
+        Print("All handed in at " .. zone .. "!")
+        return
+    end
+    local ordered = QSB.NearestOrder(list)
+    local api = SPFApi()
+    if api then
+        local stops = {}
+        for _, q in ipairs(ordered) do
+            local pl = QSB.TurnInPlace(q)
+            if pl and pl.map and pl.x then
+                stops[#stops + 1] = { map = pl.map, x = pl.x, y = pl.y, hold = true, questID = q.questID,
+                    title = (pl.npc and (pl.npc .. ": ") or "") .. q.title }
+            end
+        end
+        if #stops > 0 then
+            local ok, started = pcall(api.NavigateRoute, OWNER, stops)
+            if ok and started then
+                chain.spf, chain.current = true, ordered[1].questID
+                QSB.QueueRefresh()
+                return
+            end
+        end
+    end
+    -- no Shortest Path (or it couldn't plan): the game's arrow, one at a time
+    chain.spf = false
+    chain.current = ordered[1].questID
+    if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then C_SuperTrack.SetSuperTrackedQuestID(chain.current) end
+    QSB.QueueRefresh()
+end
+
+-- Click once to start, again to stop.
+function QSB.ChainTurnIns(zone, quests)
+    if chain and chain.zone == zone then QSB.StopChain(); return "stopped" end
+    if InCombatLockdown and InCombatLockdown() then
+        Print("Routes can't be planned in combat. Try again once it's over.")
+        return nil
+    end
+    if not quests or #quests == 0 then return nil end
+    if chain then QSB.StopChain(true) end
+    if QSB.StopRoute then QSB.StopRoute(true) end
+    chain = { zone = zone, pending = {} }
+    for _, q in ipairs(quests) do chain.pending[q.questID] = true end
+    AdvanceChain()
+    if not chain then return nil end
+    local first = QSB.NearestOrder(StillReady())
+    local names = {}
+    for i, q in ipairs(first) do names[i] = q.title end
+    Print("Turn-in route for " .. zone .. ", nearest first: " .. table.concat(names, ", ") .. "."
+        .. (chain.spf and "" or (QSB.HasRouter() and "" or " (Install Shortest Path Forever for full routes.)")))
+    return chain.spf and "route" or "arrow"
+end
+
+local function OnTurnedIn(questID)
+    if not chain or not questID or not chain.pending[questID] then return end
+    chain.pending[questID] = nil
+    C_Timer.After(0.5, AdvanceChain) -- let the log update, then re-plan from here
+end
+
+---------------------------------------------------------------------------
 -- Fastest route to a quest
 ---------------------------------------------------------------------------
 -- With Shortest Path Forever installed, its "travel to my tracked quest" plans the
@@ -449,6 +708,7 @@ function QSB.RouteTo(q)
         return nil
     end
     if routed then QSB.StopRoute(true) end -- switching to another quest
+    if QSB.StopChain then QSB.StopChain(true) end
     local addedWatch = not q.tracked
     if QSB.HasRouter() then
         SuperTrack(q.questID)
@@ -886,6 +1146,9 @@ frame:SetScript("OnEvent", function(_, event, ...)
         OnSystemMessage(...)
     elseif event == "QUEST_ACCEPTED" then
         OnQuestAccepted(...)
+        QSB.QueueRefresh()
+    elseif event == "QUEST_TURNED_IN" then
+        OnTurnedIn(...)
         QSB.QueueRefresh()
     elseif event == "PLAYER_REGEN_ENABLED" then
         if db then QSB.UI.ApplyTracker(); QSB.QueueRefresh() end

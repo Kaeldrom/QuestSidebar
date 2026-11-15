@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.0 - 2026-11-15
+
+- **The Turn in tab is grouped by where you hand quests in**, not the zone you got them in. A quest you did in the Barrens but hand in at Orgrimmar is listed under **Orgrimmar**. The place you're in comes first, then A to Z. Inside each place, quests are listed nearest first.
+- **Each quest names who to hand it to**, for example "Hand in to Thrall in Orgrimmar.", when the game doesn't provide its own turn-in text.
+- **Route to every turn-in at a place.** Each place header in the Turn in tab has a map button. Click it to be taken to every hand-in there, one after another, nearest first. Each time you hand one in, the rest are re-planned from where you're standing. Click it again to stop.
+  - With Shortest Path Forever, it's one journey with a stop at each NPC.
+  - Without it, the quest arrow moves from one hand-in to the next.
+- Turn-in places come from Questie's quest database when Questie is installed. Without Questie, the game's own turn-in marker is used.
+
 ## 1.9.0 - 2026-11-14
 
 - **XP for each turn-in.** Every finished quest shows the XP you'll get for handing it in, for example **+1,250 XP**, next to "Ready to turn in".
